@@ -1,0 +1,24 @@
+# Final generated game art
+
+Mode: built-in imagegen tool, transparent character atlas. Original generations remain in the Codex generated-images library. This copy is bundled with the game:
+
+- `public/sprites/underworld-cast.png`: 4 × 4 atlas, active frames 0–4 ghost-destroyer idle/run/sword/whip and 5–7 Qilin/Pixiu/Bai Ze. Enemy frames 8–15 are unused; enemies now use solid articulated engine geometry in `src/creatures.js`.
+
+The ground now uses a simple, light procedural brush wash. The earlier detailed terrain texture is retained at `art/underworld-inkstone-v1.png` for reference and is not loaded or exported.
+
+## Character atlas prompt
+
+Use case: stylized-concept. Asset type: ONE 4-column by 4-row production game sprite atlas, 1536x1536, sixteen equal cells. Genuine transparent background, no text, no labels, no lines.
+ABSOLUTELY STRICT TOP-DOWN OVERHEAD camera, looking straight DOWN onto the heads, shoulders and backs of the characters at 90 degrees. These are playable overhead action game sprites, NOT frontal portraits, NOT side views. Every sprite faces toward the TOP of its cell. Every entire sprite contained in its cell with generous transparent padding, no touching neighboring cells.
+Art: premium hand-painted dark-fantasy illustrated sprites, thick expressive rough INK brush strokes, wet watercolor edges and solid filled black/indigo silhouettes with selective luminous pigment. A lush sinister underworld, vicious aggressive demons, charismatic burly ghost-destroying hero. Clear silhouette at 32-64px. No wireframes, empty polygons or hollow cubes. No Chinese writing, seals or ornamental UI.
+ROW ONE is FOUR CONSISTENT FRAMES OF THE SAME HERO: a muscular stocky adult male ghost destroyer, broad bare forearms, heavy shoulders, messy black hair tied back, ragged oxblood-red coat, dark leather boots and iron bracers; a huge short iron sword in his right hand and a coiled segmented chain-whip in the left. Overhead view emphasizes the top of his head, very wide shoulders and feet below; face is barely visible from above, no portrait. Cell 1 idle ready stance, cell 2 running with left foot forward, cell 3 running right foot forward, cell 4 a broad forceful right-handed sword swing with a dark blood-red brush smear. Same size and visual design, body centered identically, weapons kept inside each cell.
+ROW TWO: Cell 5 SAME HERO performing a long chain-whip lash in a powerful low stance, chain curled around body within cell, viewed strictly overhead. Cell 6 QILIN companion: small teal-and-gold scaly deer-dragon with antlers, four feet and flowing tail, strict top-down silhouette. Cell 7 PIXIU companion: compact winged golden lion-dragon, round haunches and lively swishing tail, top down. Cell 8 BAI ZE companion: small shaggy ivory white horned beast with violet accents, three small glowing eyes, top down.
+ROW THREE: Cell 9 angry coral-red ink imp with horns and long ragged ghost tail; cell 10 raspberry ink slime, a filled irregular puddle with vicious tiny eyes; cell 11 golden wraith with a painted spine and swirling black brush appendages; cell 12 a crimson stingray demon with two wide fins and a hooked tail. All top-down.
+ROW FOUR: Cell 13 violet spectral squid with one bright eye on top of its head and sharp tentacles; cell 14 three-eyed pink-purple demon ooze with spiny back and ink splatters; cell 15 a wide turquoise armored underworld beast with dark filled body and flaring fins; cell 16 enormous charcoal kraken with a circular maw on TOP, four glowing coral eyes, curling tentacles and ink-blood accents. All strictly overhead sprites facing up.
+No background of any kind. Original fictional designs. Mature supernatural violence, no realistic human gore.
+
+## Earlier terrain prompt (unused)
+
+Use case: stylized-concept. Asset type: a single seamless 1024x1024 terrain albedo texture for a dark fantasy underworld game, tileable in both directions, strictly overhead orthographic texture, no perspective, no lighting baked from a single side.
+A sinister, lush painted underworld floor: cracked charcoal and muted violet slate, tangled black root-veins growing THROUGH the rock, tiny areas of ash-grey fossil bone deposits, oxblood-red liquid seeping into narrow fissures, sparse sickly green mineral glimmers. Expressive dry ink brushwork mixed with rich watercolor stains. Tactile hand-illustrated stone with irregular broad shapes and broken layers. Moody yet readable, mid-value muted blue-grey/lavender ground about 60 percent, dark ink roots and cracks about 30 percent, red and pale mineral details about 10 percent. No regular square tiles, no grid, no architecture, no props, no characters, no writing, no skull portraits, no cultural motifs, no border, no watermark. The result should make curved solid 3D geometry look like an illustrated haunted terrain, not a blank smooth render or photoreal photograph.
+
