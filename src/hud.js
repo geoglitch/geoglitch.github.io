@@ -1,5 +1,6 @@
 import { CONFIG, COLORS, WEAPONS, DRONES } from './config.js';
 import { clamp, TAU } from './math.js';
+import { layoutWeaponBeacons } from './weapon-beacons.js';
 
 const FONT = '"Space Grotesk", monospace';
 const DISPLAY = '"Barlow Condensed", Impact, sans-serif';
@@ -47,16 +48,19 @@ export class HUD {
       ctx.fillStyle='#092c4c99';ctx.fillRect(pad-13,15,mobile?164:206,98);
       this.line(ctx,pad-13,15,pad+30,15,COLORS.jade,2);this.line(ctx,pad-13,15,pad-13,46,COLORS.jade,2);
       this.text(ctx,'SCORE',pad,28,10,COLORS.jade,'left',600);
-      ctx.save();ctx.shadowColor=COLORS.jade;ctx.shadowBlur=15;this.text(ctx,String(sim.score).padStart(7,'0'),pad,58,mobile?33:44,'#edffff','left',900,DISPLAY);ctx.restore();
+      ctx.save();ctx.shadowColor=COLORS.jade;ctx.shadowBlur=15+sim.scorePulse*10;this.text(ctx,String(sim.score).padStart(7,'0'),pad,58,(mobile?33:44)*(1+sim.scorePulse*.035),'#edffff','left',900,DISPLAY);ctx.restore();
       this.text(ctx, `×${sim.combo.toFixed(1)}`, pad, 91, 16, COLORS.jade, 'left', 600);
       this.text(ctx, `◆ ${sim.credits}`, pad+77,91,12,COLORS.gold,'left',600);
       const bar = clamp(sim.comboTime / 6, 0, 1);
       this.line(ctx, pad, 109, pad + 70, 109, '#203c3c', 2);
       this.line(ctx, pad, 109, pad + 70 * bar, 109, COLORS.jade, 2);
+      const notice=sim.chainNotice?.life>0?sim.chainNotice:sim.sweepNotice?.life>0?sim.sweepNotice:null;
+      if(notice){ctx.save();ctx.globalAlpha=Math.min(1,notice.life*3);this.text(ctx,`${notice===sim.chainNotice?'CHAIN ×'+notice.count:'SWEEP'}  +${notice.bonus}`,pad,129,mobile?10:12,notice===sim.chainNotice?COLORS.gold:COLORS.jade,'left',600);ctx.restore();}
       const minutes=Math.floor(sim.time/60),seconds=Math.floor(sim.time%60);
       this.text(ctx,`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`,mobile?w*.57:w/2,33,mobile?18:22,sim.level.color,'center',600);
       const pressure=Math.min(1,sim.enemies.length/70);for(let i=0;i<12;i++)this.line(ctx,w/2-29+i*5,58,w/2-29+i*5,64,i/12<pressure?sim.level.color:'#31425d',2);
       if(sim.exitZone)this.text(ctx,'RECHARGE',w/2,83,9,'#aaff82','center',600);
+      else if(sim.waveWarning?.life>0&&!sim.level.boss){const warning=sim.waveWarning;ctx.save();ctx.globalAlpha=.65+.3*Math.sin(warning.life*10);this.text(ctx,`${warning.pattern==='surge'?'SURGE  ':'››  '}+${warning.count}`,mobile?w*.57:w/2,83,mobile?10:12,warning.color,'center',600);ctx.restore();}
       const maxWidth = mobile ? 66 : 112;
       for (let i = 0; i < p.maxHp; i++) this.diamond(ctx, w - pad - maxWidth + i * (maxWidth / Math.max(p.maxHp - 1, 1)), 36, mobile ? 5 : 7, i < p.hp ? COLORS.jade : '#345052', i < p.hp);
       this.text(ctx, `BEST ${String(Math.max(sim.score, sim.highScore)).padStart(7, '0')}`, w - pad, 64, 9, COLORS.dim, 'right');
@@ -116,15 +120,41 @@ export class HUD {
     if(!inside)this.text(ctx,'›',x,y-19,18,color,'center',600);
     this.area(exit?'navigateSafe':`navigateWeapon${target.id}`,x-26,y-24,52,75);
   }
+  drawWeaponBeacons(ctx) {
+    const w=this.width,h=this.height,t=this.sim.worldTime,focus=this.renderer.navigationEntity;
+    const entries=this.sim.weaponDrops.map(drop=>{
+      const pos=this.renderer.screenPoint(drop.x,.45,drop.z),inside=pos.visible&&pos.x>40&&pos.x<w-40&&pos.y>160&&pos.y<h-170;
+      const d=Math.max(1,Math.hypot(drop.x,drop.z)),near=this.renderer.screenPoint(drop.x/d*3,.85,drop.z/d*3),center=this.renderer.screenPoint(0,.85,0),angle=Math.atan2(near.x-center.x,center.y-near.y);
+      return {...drop,inside,anchor:pos,angle,selected:focus?.type==='weapon'&&focus.id===drop.id,x:inside?pos.x:w/2+Math.sin(angle)*(w/2-36),y:inside?pos.y-46:h/2-Math.cos(angle)*(h/2-170)};
+    });
+    const obstacles=this.hitAreas.map(a=>({x:a.x+a.w/2,y:a.y+a.h/2,size:Math.max(a.w,a.h)}));
+    for(const mark of layoutWeaponBeacons(entries,w,h,obstacles,this.renderer.screenPoint(0,.85,0))){
+      const {x,y,size,inside,selected,weapon}=mark,color=WEAPONS[weapon].color,r=size/2,cut=10;
+      ctx.save();
+      if(inside){ctx.globalAlpha=.65;this.line(ctx,x,y+r,mark.anchor.x,mark.anchor.y,color,1);this.diamond(ctx,mark.anchor.x,mark.anchor.y,4,color,false);}
+      ctx.globalAlpha=inside||selected?1:.82;
+      ctx.beginPath();ctx.moveTo(x-r+cut,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x+r,y+r-cut);ctx.lineTo(x+r-cut,y+r);ctx.lineTo(x-r,y+r);ctx.lineTo(x-r,y-r+cut);ctx.closePath();
+      ctx.fillStyle='#071526ee';ctx.fill();ctx.strokeStyle=selected?'#efffff':color;ctx.lineWidth=selected?2.5:1.5;ctx.shadowColor=color;ctx.shadowBlur=selected?17:8;ctx.stroke();ctx.shadowBlur=0;
+      const wash=ctx.createLinearGradient(x,y-r,x,y+r);wash.addColorStop(0,color+'38');wash.addColorStop(1,color+'04');ctx.fillStyle=wash;ctx.fill();
+      this.weaponDiagram(ctx,weapon,x,y,inside?46:33,color,t);
+      // Pickup-only corner tabs and a plus distinguish equipment from enemy shapes.
+      this.line(ctx,x-r+cut,y-r,x-r+cut+14,y-r,'#f0ffff',2);
+      this.line(ctx,x+r-8,y+r-9,x+r-8,y+r-3,color,1.5);this.line(ctx,x+r-11,y+r-6,x+r-5,y+r-6,color,1.5);
+      if(selected){const phase=(t*.5)%1;ctx.strokeStyle='#eaffff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r+6,-Math.PI/2,-Math.PI/2+TAU*(.3+phase*.35));ctx.stroke();}
+      if(!inside){ctx.translate(x,y);ctx.rotate(mark.angle);ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(0,-r-8);ctx.lineTo(-4,-r-3);ctx.lineTo(4,-r-3);ctx.closePath();ctx.fill();}
+      ctx.restore();this.area(`navigateWeapon${mark.id}`,x-r,y-r,size,size);
+    }
+  }
   drawWorldMarks(ctx) {
     const sim = this.sim;
     const project = (x, y, z) => this.renderer.screenPoint(x, y, z);
-    for(const drop of sim.weaponDrops){
-      this.drawBeacon(ctx,drop,null,WEAPONS[drop.weapon].color);
-    }
     for(const gate of sim.gates){
       const pos=project(gate.x,1.8,gate.z),inside=pos.visible&&pos.x>35&&pos.x<this.width-35&&pos.y>150&&pos.y<this.height-170,a=Math.atan2(gate.x,gate.z),x=inside?pos.x:this.width/2+Math.sin(a)*(this.width/2-32),y=inside?pos.y:this.height/2-Math.cos(a)*(this.height/2-170);
       ctx.strokeStyle=gate.color;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(x,y,10,15,0,0,TAU);ctx.stroke();this.line(ctx,x-6,y,x+6,y,gate.color,2);this.line(ctx,x+2,y-4,x+6,y,gate.color,2);this.line(ctx,x+2,y+4,x+6,y,gate.color,2);this.area(`navigateGate${gate.id}`,x-25,y-25,50,50);
+    }
+    for(const reactor of sim.enemies.filter(e=>e.type==='anchor'&&!e.dead&&Math.hypot(e.x,e.z)<28)){
+      const pos=project(reactor.x,2.5,reactor.z);if(!pos.visible||pos.x<30||pos.x>this.width-30||pos.y<150||pos.y>this.height-150)continue;
+      this.diamond(ctx,pos.x,pos.y,7,COLORS.gold,false);this.area(`navigateBoss${reactor.id}`,pos.x-20,pos.y-20,40,40);
     }
     for(const boss of sim.enemies.filter(e=>(e.type==='boss'||e.type==='pillar')&&!e.dead)){
       const pos=project(boss.x,1,boss.z),inside=pos.visible&&pos.x>45&&pos.x<this.width-45&&pos.y>160&&pos.y<this.height-170,angle=Math.atan2(boss.x,boss.z),x=inside?pos.x:this.width/2+Math.sin(angle)*(this.width/2-50),y=inside?pos.y:this.height/2-Math.cos(angle)*(this.height/2-160);
@@ -133,6 +163,8 @@ export class HUD {
       else{ctx.beginPath();for(let i=0;i<=6;i++){const a=i*TAU/6;i?ctx.lineTo(x+Math.cos(a)*15,y+Math.sin(a)*15):ctx.moveTo(x+Math.cos(a)*15,y+Math.sin(a)*15);}ctx.stroke();this.diamond(ctx,x,y,6,'#ff75c7',false);}
       ctx.restore();this.area(`navigateBoss${boss.id}`,x-28,y-28,56,56);
     }
+    if(sim.exitZone)this.drawBeacon(ctx,sim.exitZone,'SAFE ZONE','#aaff82',true);
+    this.drawWeaponBeacons(ctx);
     for (const e of sim.enemies) {
       if (e.warmup > 0) {
         const pos = project(e.x, 0.1, e.z);
@@ -156,7 +188,6 @@ export class HUD {
       const d=Math.max(1,Math.hypot(e.x,e.z)),near=project(e.x/d*3,.8,e.z/d*3),center=project(0,.8,0),angle=Math.atan2(near.x-center.x,center.y-near.y),x=this.width/2+Math.sin(angle)*(this.width/2-26),y=this.height/2-Math.cos(angle)*(this.height/2-135);
       ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.fillStyle='#ff638d';ctx.shadowColor='#ff638d';ctx.shadowBlur=8;ctx.beginPath();ctx.moveTo(0,-8);ctx.lineTo(-5,4);ctx.lineTo(5,4);ctx.closePath();ctx.fill();ctx.restore();
     }
-    if(sim.exitZone)this.drawBeacon(ctx,sim.exitZone,'SAFE ZONE','#aaff82',true);
     if (sim.mode === 'playing' && !this.input.touch && this.input.mouse.active) {
       const x = this.input.mouse.x * this.width, y = this.input.mouse.y * this.height;
       ctx.globalAlpha = 0.75;
@@ -213,13 +244,14 @@ export class HUD {
       if(i===7&&owned){this.text(ctx,String(p.ammo[7]),xx+29,yy-14,8,WEAPONS[7].color);if(p.sisterCD>0)this.line(ctx,xx+5,yy+17,xx+5+22*(1-p.sisterCD/WEAPONS[7].cooldown),yy+17,WEAPONS[7].color,2);}
       if(owned)this.area(`weapon${i}`,xx-5,yy-21,mobile?44:56,42);
     }
-    if(this.sim.weaponNotice?.life>0)this.weaponDiagram(ctx,this.sim.weaponNotice.weapon,w/2,h*.67,48,WEAPONS[this.sim.weaponNotice.weapon].color);
+    if(this.sim.weaponNotice?.life>0){const n=this.sim.weaponNotice,c=WEAPONS[n.weapon].color,fade=Math.min(1,n.life*2),arrival=Math.max(0,n.life-1.8)/.6;ctx.save();ctx.globalAlpha=fade;ctx.fillStyle='#071526cc';ctx.fillRect(w/2-43,h*.67-39,86,78);this.line(ctx,w/2-43,h*.67-39,w/2+43,h*.67-39,c,2);this.weaponDiagram(ctx,n.weapon,w/2,h*.67,56+arrival*20,c);ctx.restore();}
   }
-  weaponDiagram(ctx,weapon,x,y,size,color){
+  weaponDiagram(ctx,weapon,x,y,size,color,time=null){
     ctx.save();ctx.translate(x,y);ctx.scale(size/36,size/36);ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';ctx.shadowColor=color;ctx.shadowBlur=6;
     const line=(a,b,c,d)=>{ctx.beginPath();ctx.moveTo(a,b);ctx.lineTo(c,d);ctx.stroke();};
     const circle=(a,b,r)=>{ctx.beginPath();ctx.arc(a,b,r,0,TAU);ctx.stroke();};
     const head=(a,b)=>{ctx.beginPath();ctx.moveTo(a,b-4);ctx.lineTo(a-3,b+2);ctx.lineTo(a+3,b+2);ctx.closePath();ctx.fill();};
+    if(time!==null){const phase=time*.7%1;ctx.globalAlpha*=.85+.15*Math.sin(time*2);if(weapon===2)ctx.rotate(time*.45);if(weapon===3||weapon===4||weapon===5){ctx.translate(0,2-phase*4);}if(weapon===6){ctx.scale(.92+Math.sin(time*2)*.08,.92+Math.sin(time*2)*.08);}}
     if(weapon===0){ctx.beginPath();ctx.moveTo(-14,12);ctx.bezierCurveTo(-16,-12,11,-15,11,0);ctx.bezierCurveTo(11,12,-4,12,-3,0);ctx.stroke();line(2,-11,6,-17);line(10,-8,15,-14);}
     if(weapon===1){ctx.beginPath();ctx.moveTo(-15,15);ctx.bezierCurveTo(16,12,-17,-6,2,-9);ctx.bezierCurveTo(21,-12,11,-20,8,-17);ctx.stroke();circle(-15,15,2);}
     if(weapon===2){circle(0,0,12);for(const a of[0,Math.PI]){ctx.save();ctx.rotate(a);ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(7,-10);ctx.lineTo(-3,-9);ctx.closePath();ctx.fill();ctx.restore();}}
@@ -277,6 +309,7 @@ export class HUD {
     this.text(ctx, win ? 'RUN COMPLETE' : 'SHIP LOST', w / 2, h * 0.4, Math.min(74, w * 0.105), COLORS.white, 'center', 900, DISPLAY);
     this.text(ctx, String(this.sim.score).padStart(7, '0'), w / 2, h * 0.54, 44, COLORS.jade, 'center', 900, DISPLAY);
     this.text(ctx, `${Math.floor(this.sim.time/60)}:${String(Math.floor(this.sim.time%60)).padStart(2,'0')}     ·     ${this.sim.kills} TARGETS CLEARED`, w / 2, h * 0.63, Math.min(11, w * 0.025), COLORS.dim, 'center');
+    this.text(ctx,`${this.sim.wavesCleared} SWEEPS   ·   BEST CHAIN ×${this.sim.bestReactorChain}`,w/2,h*.68,10,COLORS.gold,'center',600);
     this.text(ctx, 'ENTER / TOUCH TO RETURN', w / 2, h * 0.78, 12, COLORS.jade, 'center', 600);
     this.area('restart', 0, h * 0.65, w, h * 0.35);
   }

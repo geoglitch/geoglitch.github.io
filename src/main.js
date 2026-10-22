@@ -17,9 +17,9 @@ let renderer, hud;
 
 async function loadFonts() {
   try {
-    const base = import.meta.env.BASE_URL;
+    const base = new URL('../public/', import.meta.url).href;
     const fonts = [new FontFace('Barlow Condensed', `url(${base}fonts/barlow-heavy.ttf)`, { weight: '900' }), new FontFace('Space Grotesk', `url(${base}fonts/space-grotesk.ttf)`, { weight: '100 900' })];
-    await Promise.all(fonts.map(async f => { await f.load(); document.fonts.add(f); }));
+    await Promise.race([Promise.all(fonts.map(async f => { await f.load(); document.fonts.add(f); })), new Promise(resolve => setTimeout(resolve, 2000))]);
   } catch { /* The canvas font fallback keeps offline boot playable. */ }
 }
 
@@ -69,8 +69,7 @@ async function boot() {
   await loadFonts();
   try { renderer = new GameRenderer(canvas, sim); }
   catch (error) {
-    document.getElementById('boot').textContent = 'WebGL 2 is required. Enable hardware acceleration and reload.';
-    console.error(error); return;
+    throw new Error(`Graphics initialization failed: ${error.message}. Check that WebGL and hardware acceleration are enabled.`, { cause: error });
   }
   hud = new HUD(sim, renderer, input, audio);
   sim.movementResolver=(x,z)=>renderer.surface.resolveMotion(x,z);
@@ -143,7 +142,7 @@ async function boot() {
     frames++; fpsClock += dt;
     if (fpsClock >= 0.5) {
       hud.fps = frames / fpsClock;renderer.adaptResolution(hud.fps); frames = 0; fpsClock = 0;
-      Object.assign(canvas.dataset, { mode: sim.mode, time:sim.time.toFixed(1), level: String(sim.level.number), hp: String(sim.player.hp), score: String(sim.score), enemies: String(sim.enemies.length), shots: String(sim.bullets.length), fps: hud.fps.toFixed(1), x: sim.player.x.toFixed(2), z: sim.player.z.toFixed(2), drone:sim.supports[0].type,droneCount:String(sim.supports.length),credits:String(sim.credits),obstacles:String(sim.obstacles.filter(o=>!o.broken).length),weapon:String(sim.player.weapon),ownedWeapons:sim.player.ownedWeapons.join(','),weaponDrops:String(sim.weaponDrops.length),ammo:String(sim.player.ammo[sim.player.weapon]??''),exit:sim.exitZone?'open':'closed',terrainPulse:String(sim.terrainPulse),worldScale:renderer.surface.worldScale.toFixed(2),geometry:'native',autoFire:'true',heading:(sim.player.angle*180/Math.PI).toFixed(0),speed:Math.hypot(sim.player.vx,sim.player.vz).toFixed(1),travel:renderer.surface.travel.toFixed(1),destination:renderer.navigationEntity?renderer.navigationEntity.type:renderer.navigationTarget?'active':'none',cameraDistance:renderer.surface.distance(renderer.camera.position).toFixed(1),anchorError:renderer.surface.distance(renderer.surface.anchor).toFixed(3),overdrive:sim.player.overdrive.toFixed(1),charge:String(sim.player.charge),sisters:String(sim.sisters.length),waves:String(sim.waveCount),waveSize:String(sim.lastWave?.count??0),terrainBlocked:String(renderer.surface.blocked),warpCooldown:sim.player.warpCD.toFixed(1),targets:JSON.stringify(hud.hitAreas.filter(a=>a.id.startsWith('navigate')).map(a=>({id:a.id,x:a.x+a.w/2,y:a.y+a.h/2}))),resolutionScale:renderer.engine.getHardwareScalingLevel().toFixed(2),pillars:String(sim.enemies.filter(e=>e.type==='pillar'&&!e.dead).length),enemyKinds:[...new Set(sim.enemies.map(e=>e.type))].join(','),reactors:String(sim.enemies.filter(e=>e.type==='anchor'&&!e.dead).length) });
+      Object.assign(canvas.dataset, { mode: sim.mode, time:sim.time.toFixed(1), level: String(sim.level.number), hp: String(sim.player.hp), score: String(sim.score), enemies: String(sim.enemies.length), shots: String(sim.bullets.length), fps: hud.fps.toFixed(1), x: sim.player.x.toFixed(2), z: sim.player.z.toFixed(2), drone:sim.supports[0].type,droneCount:String(sim.supports.length),credits:String(sim.credits),obstacles:String(sim.obstacles.filter(o=>!o.broken).length),weapon:String(sim.player.weapon),ownedWeapons:sim.player.ownedWeapons.join(','),weaponDrops:String(sim.weaponDrops.length),ammo:String(sim.player.ammo[sim.player.weapon]??''),exit:sim.exitZone?'open':'closed',terrainPulse:String(sim.terrainPulse),worldScale:renderer.surface.worldScale.toFixed(2),geometry:'native',autoFire:'true',heading:(sim.player.angle*180/Math.PI).toFixed(0),speed:Math.hypot(sim.player.vx,sim.player.vz).toFixed(1),travel:renderer.surface.travel.toFixed(1),destination:renderer.navigationEntity?renderer.navigationEntity.type:renderer.navigationTarget?'active':'none',cameraDistance:renderer.surface.distance(renderer.camera.position).toFixed(1),anchorError:renderer.surface.distance(renderer.surface.anchor).toFixed(3),overdrive:sim.player.overdrive.toFixed(1),charge:String(sim.player.charge),sisters:String(sim.sisters.length),waves:String(sim.waveCount),wavesCleared:String(sim.wavesCleared),reactorChain:String(sim.bestReactorChain),wavePattern:sim.lastWave?.pattern||'',waveSize:String(sim.lastWave?.count??0),terrainBlocked:String(renderer.surface.blocked),warpCooldown:sim.player.warpCD.toFixed(1),targets:JSON.stringify(hud.hitAreas.filter(a=>a.id.startsWith('navigate')).map(a=>({id:a.id,x:a.x+a.w/2,y:a.y+a.h/2}))),resolutionScale:renderer.engine.getHardwareScalingLevel().toFixed(2),pillars:String(sim.enemies.filter(e=>e.type==='pillar'&&!e.dead).length),enemyKinds:[...new Set(sim.enemies.map(e=>e.type))].join(','),reactors:String(sim.enemies.filter(e=>e.type==='anchor'&&!e.dead).length) });
     }
     const world = input.mouse.active && !input.touch ? renderer.worldPoint(input.mouse.x, input.mouse.y) : null;
     input.menu = hud.settingsOpen || ['paused', 'upgrade'].includes(sim.mode);
@@ -186,4 +185,4 @@ async function boot() {
   // A read-only snapshot makes automated smoke checks possible without UI hooks.
   window.__GEOMETRYGLITCH__ = { snapshot: () => ({ mode: sim.mode, level: sim.level.number, hp: sim.player.hp, score: sim.score, enemies: sim.enemies.length, shots: sim.bullets.length, fps: hud.fps, width: renderer.width, height: renderer.height, player: { x: sim.player.x, z: sim.player.z }, engine: 'Babylon.js', supports: sim.supports.map(s => s.type), gates: 50 }) };
 }
-boot();
+export const ready = boot();

@@ -47,3 +47,37 @@ The [Sektori developer description](https://store.steampowered.com/app/2105620/S
 [Housemarque’s Resogun description](https://housemarque.com/games/resogun) emphasizes hordes, multipliers and vivid block destruction. Applied here: stacked pillars lose sections as damaged and shatter into energy and glowing fragments. The existing late-stage splitting blocks and reactor chain explosions provide additional destructive reactions. Full voxel-world destruction is not implemented.
 
 These are selected design influences, not claims of equivalent scope, performance or quality. The latest balance pass reduces weapon reach/damage, knockback, healing, pulse strength and hit protection; spectacle remains bright while the ship must keep moving.
+
+## Beyond twin-stick shooters — proposed next iterations
+
+These proposals are design inferences, not implemented features. The pickup presentation described afterward is implemented. Review praise identifies promising mechanics, but does not predict retention for this game.
+
+### 1. Weapon evolutions that change the way you move
+
+[PC Gamer's Vampire Survivors review](https://www.pcgamer.com/vampire-survivors-review/) praises complementary firing patterns and the payoff of evolving a build, while noting that an easy steamroll can become dull. Adaptation: offer two visible field modules for the current weapon. A fan could bounce off ridges or return like a boomerang; a whip could leave a brief electric tether or become a narrower, longer lash. Each form should trade coverage, cadence or range. Start with three weapons and two forms each. Show the resulting attack in its pickup hologram. Cap the run at two mutations so selection remains understandable on a phone.
+
+### 2. Lure-and-crush terrain traps
+
+[PC Gamer's Deep Rock Galactic: Survivor review](https://www.pcgamer.com/games/roguelike/deep-rock-galactic-survivor-review/) particularly praises terrain tactics and clever environmental kills, including falling supply pods. Adaptation: forecast a falling slab with a generous striped landing zone. Lure a wave underneath, dash out, and use the new slab as cover before it crumbles into energy. This builds on the current pillars, ridges and pulse. Test one slab at a time, with a traversable escape route and a distinct danger color. The same review also supports overclocks that alter weapon behavior.
+
+### 3. Optional weapon caches with a price
+
+[PC Gamer's Risk of Rain 2 review](https://www.pcgamer.com/risk-of-rain-2-review/) praises surprising item combinations and exploration. The related [staff retrospective](https://www.pcgamer.com/risk-of-rain-2-is-the-co-op-game-i-keep-coming-back-to/) describes the temptation to keep looting while difficulty rises. Adaptation: an optional cache advertises its exact weapon before activation. Passing through a marked switch starts a short ambush; surviving opens the cache. Offer a desirable mutation or scarce ammunition. Skipping it should remain a good decision when shields are low.
+
+### 4. A director that gives pressure a rhythm
+
+[Michael Booth's Valve presentation, The AI Systems of Left 4 Dead](https://steamcdn-a.akamaihd.net/apps/valve/2009/ai_systems_of_l4d_mike_booth.pdf), pp. 77–91, describes peaks, fades and recovery, adjusting pacing separately from difficulty. Adaptation: estimate pressure from nearby threats, incoming shots and recent hits. After a sustained peak, briefly defer a new formation while existing enemies remain dangerous. Keep enemy health and damage consistent. Prototype a 4–6 second opening to collect energy and choose a route, followed by a warned surge. Compare against the current authored wave timing; avoid punishing skilled players with concealed health scaling.
+
+### 5. Random arena events that the player can exploit
+
+The [#killallzombies developer announcement](https://blog.playstation.com/?p=137011) describes arena events, timed bonuses and encounter choices driven by spectators. Adaptation for a standalone game: draw a telegraphed event from a shuffled bag every 45–70 seconds. Examples: a ridge becomes a breakable wall; two gates exchange exits; a narrow bridge gets temporary side platforms; a slow gravity well pulls enemies and energy inward. Keep one event active at a time, prevent immediate repeats, and retain a viable escape path. First prototype the gravity well and breakable wall. Audience voting is unnecessary here.
+
+### 6. Visible combinations and small secrets
+
+Build on the discovery appeal discussed in the Vampire Survivors and Risk of Rain 2 reviews: award one experimental module for a specific visible feat, such as a three-reactor chain or a complete wave cleared with a ribbon. A paired-symbol hint can suggest the challenge without explanatory text. Give the reward a new behavior, such as missiles orbiting briefly before seeking. Keep these optional and deterministic once the player understands the rule. Later, offer a seed that can be replayed locally, making surprising event combinations reproducible without a server or leaderboard.
+
+Recommended order: weapon evolutions, one lure-and-crush trap, then optional caches. Those create immediate choices within the existing navigation and automatic-fire loop. Follow with the director and a small event bag after measuring whether players can identify weapons, read danger and make a deliberate escape. Useful checks: pickup identification at a glance, intentional equipment detours, avoidable versus unreadable deaths, and whether idle firing becomes sufficient to survive.
+
+### Implemented now: equipment that advertises its function
+
+Each ground pickup has an animated native 3D attack display: flexible strings, orbiting blades, five fan lanes, a piercing beam, converging seekers, an expanding nova, two sister ships or a rainbow ribbon. A low plinth and colored corner tabs distinguish equipment from enemies. Larger dark-backed HUD diagrams remain legible against the floor, show a selected-route accent and a direction arrow off screen, and displace to avoid one another, the ship and navigation controls where space permits. Tap regions are at least 48 pixels wide. Collection gives a larger brief attack diagram. There are no text labels beneath pickups, rarity tiers, damage buffs or ammunition balance changes in this pass.

@@ -13,11 +13,32 @@
       body{position:fixed;inset:0}
       #boot{position:fixed;inset:0;display:grid;place-content:center;color:#9bf9e8;font:700 24px monospace;letter-spacing:.25em;pointer-events:none}
       #boot small{display:block;margin-top:18px;font:11px monospace;letter-spacing:.35em;color:#50756f;text-align:center}
+      #boot[data-state="error"]{padding:28px;text-align:center;font:700 22px monospace;letter-spacing:.05em;background:#111b32}
+      #boot[data-state="error"] small{max-width:560px;line-height:1.6;letter-spacing:0;color:#c1d1e5;overflow-wrap:anywhere}
+      #boot button{justify-self:center;margin-top:24px;padding:12px 24px;background:#143d4d;border:1px solid #54fff1;color:#efffff;font:700 14px monospace;cursor:pointer;pointer-events:auto}
     </style>
   </head>
   <body>
     <canvas id="game" draggable="false" aria-label="Geometry Glitch: Automatic fire. Tap or click to move; WASD, arrows, and controller sticks also work, The ship faces its travel direction. Space to boost, E to send a terrain shockwave. Collect weapons and reach green safe zones. Controller and touch supported." tabindex="0"></canvas>
     <div id="boot">GEOMETRY GLITCH<small>INITIALIZING</small></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module">
+      const reportFailure = error => {
+        console.error('Geometry Glitch could not start:', error);
+        const panel = document.getElementById('boot');
+        if (!panel) return;
+        panel.dataset.state = 'error';
+        const detail = document.createElement('small');
+        detail.textContent = error?.message || 'Check that all game files have been uploaded, then reload.';
+        const retry = document.createElement('button');
+        retry.textContent = 'RETRY';
+        retry.addEventListener('click', () => location.reload());
+        panel.replaceChildren(document.createTextNode('UNABLE TO START'), detail, retry);
+      };
+      const timeout = setTimeout(() => reportFailure(new Error('Loading took too long. Check your connection and reload.')), 20000);
+      import('./src/main.js')
+        .then(game => game.ready)
+        .catch(reportFailure)
+        .finally(() => clearTimeout(timeout));
+    </script>
   </body>
 </html>

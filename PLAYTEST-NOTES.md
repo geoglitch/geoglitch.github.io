@@ -48,3 +48,38 @@ Renamed the title, loading screen, browser metadata and static package to Geomet
 The camera now eases its orientation more slowly, caps angular speed and smooths its focus point; ship turns are also eased and capped. Browser checks exercised several keyboard direction changes with the ship visible and the surface anchor stable. The portrait title fits without overlapping the settings icons; no console warnings or errors were captured. Current identity preview: `art/geometry-glitch-preview.png`.
 
 Disabled browser text selection, image dragging, tap highlights and touch callouts on the game. Pointer handling prevents browser selection while explicitly focusing the canvas. A browser click/drag check retained game controls with computed `user-select: none` and no console warnings or errors.
+
+## Final arcade pass — Geometry Glitch 1.0
+
+- Added distinct wedge, spiral and broad-front arrivals, alongside existing pincers and small swarms. Every fifth eligible wave becomes a larger surrounding surge with a four-beat warning and an open 100-degree forward cone. Boss support waves retain their smaller budgets.
+- Linked reactor clusters appeared at ten seconds. In a browser check, tapping one core caused all three to detonate, recorded a best chain of three, scattered neon fragments and cleared nearby enemies. The observed scene ran at about 60 FPS. This is an observation on this browser, not a hardware benchmark.
+- A normal run used keyboard movement, boosts, a terrain pulse, tap pickup of Twin Echo and a recharge marker to continue into the next world. It cleared three formations, encountered a 48-mote swarm and then a 42-enemy surge. It ended at 35.4 seconds with 114 kills and 193,929 points after standing under ranged pressure. Invulnerability and encounter skipping were not used.
+- The normal run confirmed that early formation clears award sweep bonuses while later pressure can still kill the ship. Sweep and reactor bonuses add score without healing or resetting defense cooldowns. Splitting children retain their formation membership; travelling away never awards a sweep.
+- Fixed pillar objectives being removed outside the active chart. Pillars now return ahead with their health preserved and a fresh descent warning, so leaving them behind cannot skip the objective.
+- Added bounded, bouncing solid debris to large-block and reactor destruction, a small score pulse, short formation warnings and a compact sweep/chain result summary. The calm floor palette, sparse ground glitches and eased camera rotation are retained.
+- All 77 automated checks pass. They cover surge escape geometry, formation layouts, reward accounting, splitting children, reactor chain bounds, debris cleanup and pillar re-entry in addition to the previous input, combat and world tests. Real phone and physical controller play-testing remains unverified.
+
+Final gameplay capture: `art/geometry-glitch-finish.png`. Static export: `geometry-glitch-itch.zip`.
+
+The final 1.0 production preview was browser-tested after packaging: movement, automatic fire, a grouped hunt wave and terrain pulse worked. No console warnings or errors were captured. The 47-file ZIP passed archive integrity and relative-asset checks.
+
+## Build-free GitHub Pages fix — 1.0.1
+
+The repository root previously loaded Vite-specific source: browser-unresolvable package imports, a root-absolute script URL and a Vite environment lookup. Publishing that source directly left the page on Initializing even though the separate compiled export worked.
+
+The root now loads native relative modules and a checked-in Babylon.js 8.56.2 browser runtime. Fonts resolve relative to the module URL. There are no npm dependencies, install commands or build steps needed to play, publish or edit the game. Added `.nojekyll`, a plain Node HTTP preview, a static-copy Pages workflow and direct source packaging.
+
+Browser checks used plain static servers at `http://localhost:5173/` and a repository-style `/geometry-glitch/` URL. Both reached the title and active play; movement, automatic fire and a terrain pulse worked. No console errors were associated with either working page. A separate fixture deliberately omitted the game module and displayed Unable to Start with a Retry button, confirming that module-load failure does not silently remain on Initializing. Fonts have a bounded startup wait.
+
+All 80 tests pass, including root/subpath module resolution, local engine constructors and shader registrations, and the build-free publishing contract. The GitHub Pages ZIP includes the updated workflow and optional developer tools; the itch ZIP contains only ready-to-serve game files. New screenshot: `art/geometry-glitch-static.png`.
+
+
+## Weapon readability and wider genre research
+
+- Added distinct animated 3D attack displays and low equipment plinths, larger dark-backed diagrams, offscreen direction arrows, a white selected-route accent and a larger pickup confirmation. Weapon damage, ammunition and encounter balance were unchanged.
+- Focused desktop and 390 × 690 portrait browser checks used marker clicks to approach Twin Echo. The pickup disappeared, its inventory icon unlocked and two sister ships appeared. The desktop snapshot confirmed owned modules `0,7` and exactly two temporary ships. These were short navigation checks, not full survival playthroughs or physical touch-device tests.
+- Inspected simultaneous whip, fan, orbit, ribbon and twin-ship diagrams against the ground. A stretched halo at a ridge was traced to sampling a circular decal across separate surface projections. Pickup displays now use a single tangent frame; the repeated desktop route showed compact displays without the streaks.
+- Marker placement protects the projected ship position, separates six coincident targets at 1280 × 720, 390 × 844, 320 × 568 and 844 × 390, and retains at least 48-pixel tap areas. The placement tests cover coincident projections and a gate control; they do not prove every possible combination can fit without displacement.
+- All 87 tests passed. A geometry regression exercises all nine attack displays at multiple animation times and a rotated surface frame, checking finite, bounded geometry. Native root and repository-subpath module checks remain green. Browser console checks found no warnings or errors.
+- `DESIGN-RESEARCH.md` distinguishes six proposed next iterations from the implemented pickup pass, with references to Vampire Survivors, Deep Rock Galactic: Survivor, Risk of Rain 2, Left 4 Dead and #killallzombies.
+- Updated proof: `art/geometry-glitch-weapons.png`. Both static archives package the current files directly, with no build step.

@@ -1,33 +1,4 @@
-import { Engine } from '@babylonjs/core/Engines/engine.js';
-import { Scene } from '@babylonjs/core/scene.js';
-import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera.js';
-import { Vector3, Matrix, Quaternion } from '@babylonjs/core/Maths/math.vector.js';
-import { Color3, Color4 } from '@babylonjs/core/Maths/math.color.js';
-import { Mesh } from '@babylonjs/core/Meshes/mesh.js';
-import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData.js';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder.js';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial.js';
-import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial.js';
-import { Effect } from '@babylonjs/core/Materials/effect.js';
-import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture.js';
-import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight.js';
-import { GlowLayer } from '@babylonjs/core/Layers/glowLayer.js';
-import { Layer } from '@babylonjs/core/Layers/layer.js';
-import '@babylonjs/core/Meshes/thinInstanceMesh.js';
-import '@babylonjs/core/Culling/ray.js';
-import '@babylonjs/core/Shaders/default.vertex.js';
-import '@babylonjs/core/Shaders/default.fragment.js';
-import '@babylonjs/core/Shaders/glowMapGeneration.vertex.js';
-import '@babylonjs/core/Shaders/glowMapGeneration.fragment.js';
-import '@babylonjs/core/Shaders/glowMapMerge.vertex.js';
-import '@babylonjs/core/Shaders/glowMapMerge.fragment.js';
-import '@babylonjs/core/Shaders/glowBlurPostProcess.fragment.js';
-import '@babylonjs/core/Shaders/kernelBlur.vertex.js';
-import '@babylonjs/core/Shaders/kernelBlur.fragment.js';
-import '@babylonjs/core/Shaders/color.vertex.js';
-import '@babylonjs/core/Shaders/color.fragment.js';
-import '@babylonjs/core/Shaders/layer.vertex.js';
-import '@babylonjs/core/Shaders/layer.fragment.js';
+import { Engine, Scene, FreeCamera, Vector3, Matrix, Quaternion, Color3, Color4, Mesh, VertexData, MeshBuilder, StandardMaterial, ShaderMaterial, Effect, DynamicTexture, HemisphericLight, GlowLayer, Layer } from '../vendor/babylon-core.js';
 import { CONFIG, COLORS, WEAPONS } from './config.js';
 import { SOLIDS } from './geometry.js';
 import { TAU, rng, tangentAimAngle, ribbonPoint } from './math.js';
@@ -170,6 +141,52 @@ export class GameRenderer {
     let previous;for(let i=0;i<=count;i++){const a=i*TAU/count,point=v(this.surface.map(x+Math.sin(a)*r,z+Math.cos(a)*r,height).point);if(previous)this.lines.line(previous,point,width,color);previous=point;}
   }
   string(a,b,width,color,white=true){this.lines.line(a,b,width,color);if(white)this.lines.line(a,b,width*.2,'#e6ffff');}
+  weaponPickup(drop,t) {
+    const screen=this.screenPoint(drop.x,.4,drop.z);
+    if(!screen.visible||screen.x< -100||screen.x>this.width+100||screen.y< -100||screen.y>this.height+100)return;
+    const color=WEAPONS[drop.weapon].color,selected=this.navigationEntity?.type==='weapon'&&this.navigationEntity.id===drop.id;
+    const base=this.frame(drop.x,drop.z,.22),f={...base,point:base.point.add(base.normal.scale(1.6+Math.sin(t*1.8+drop.id)*.12))};
+    const point=(x,z,y=0)=>f.point.add(f.right.scale(x)).add(f.forward.scale(z)).add(f.normal.scale(y));
+    const line=(a,b,width=.1,c=color)=>this.string(a,b,width,c);
+    const localRing=(radius,y=0,width=.07,c=color)=>{let prev;for(let i=0;i<=24;i++){const a=i*TAU/24,p=point(Math.sin(a)*radius,Math.cos(a)*radius,y);if(prev)line(prev,p,width,c);prev=p;}};
+    const arrow=(x,z,a=0,scale=.5)=>{
+      const frame={...f,point:point(x,z),rotation:f.rotation.multiply(Quaternion.RotationYawPitchRoll(a,0,0))};this.solid('dart',frame,scale,color);
+    };
+    // Grounded equipment plinths share a quiet silhouette; the floating attack is unique.
+    this.solid('cube',base,new Vector3(3.9,.22,3.9),'#233d5a');
+    for(const sx of[-1,1])for(const sz of[-1,1]){
+      const corner=base.point.add(base.right.scale(sx*2)).add(base.forward.scale(sz*2));
+      this.lines.line(corner,corner.add(base.right.scale(-sx*.7)),selected?.12:.08,color);
+      this.lines.line(corner,corner.add(base.forward.scale(-sz*.7)),selected?.12:.08,color);
+      this.lines.line(corner,corner.add(base.normal.scale(.55)),.07,color);
+    }
+    // A single tangent frame avoids a decal jumping between projected faces at a ridge.
+    let previous;for(let i=0;i<=32;i++){const a=i*TAU/32,p=base.point.add(base.right.scale(Math.sin(a)*2.4)).add(base.forward.scale(Math.cos(a)*2.4));if(previous)this.lines.line(previous,p,selected?.07:.025,color);previous=p;}
+    const phase=(t*.48+drop.id*.19)%1;
+    if(drop.weapon===0||drop.weapon===1||drop.weapon===8){
+      const rainbow=['#ff5de9','#ffb14a','#b7ff48','#54fff1','#48adff','#a28bff'];let prev;
+      for(let i=0;i<=30;i++){const u=i/30,x=-1.8+u*3.6,z=Math.sin(u*TAU+(drop.weapon===1?t*1.7:t))*(drop.weapon===1?.95:.65),p=point(x,z,.15*Math.sin(u*TAU));if(prev)line(prev,p,drop.weapon===8?.21:.14,drop.weapon===8?rainbow[Math.min(5,Math.floor(u*6))]:color);prev=p;}
+      if(drop.weapon===1)this.solid('dart',{...f,point:point(-1.8,Math.sin(t*1.7)*.95)},.45,'#ffb8f4');
+    } else if(drop.weapon===2){
+      localRing(1.4,0,.055);
+      for(const offset of[0,Math.PI]){const a=t*.9+offset,x=Math.sin(a)*1.4,z=Math.cos(a)*1.4;arrow(x,z,a+Math.PI/2,.85);line(point(x,z),point(Math.sin(a-.6)*1.4,Math.cos(a-.6)*1.4),.16);}
+    } else if(drop.weapon===3){
+      for(let i=-2;i<=2;i++){const a=i*.29;line(point(Math.sin(a)*.3,-1.5),point(Math.sin(a)*3,1.4),.06);const z=-1.3+phase*2.7;arrow(Math.sin(a)*(z+1.6),z,a,.47);}
+    } else if(drop.weapon===4){
+      line(point(0,-1.8),point(0,1.8),.22);arrow(0,1.8,0,.8);
+      for(const z of[-.7,.7]){this.solid('cube',{...f,point:point(0,z)},.5,'#decfff');line(point(-.65,z),point(.65,z),.05);}
+    } else if(drop.weapon===5){
+      for(let i=-1;i<=1;i++){let prev;for(let j=0;j<=12;j++){const u=j/12,p=point(i*(1.5-u*.95)+Math.sin(u*Math.PI)*i*.4,-1.6+u*3.1);if(prev)line(prev,p,.07);prev=p;}arrow(i*.55,1.5,-i*.4,.62);}
+    } else if(drop.weapon===6){
+      this.solid('diamond',f,1.15,color,t*.35);localRing(.8+phase*1.25,0,.09);localRing(.65,0,.1,'#e6ffff');
+      for(let i=0;i<8;i++){const a=i*TAU/8;line(point(Math.sin(a)*1.35,Math.cos(a)*1.35),point(Math.sin(a)*1.9,Math.cos(a)*1.9),.09);}
+    } else if(drop.weapon===7){
+      for(const x of[-1.05,1.05]){this.solid('ship',{...f,point:point(x,.25)},1.15,color);line(point(x,-.6),point(x,-1.65),.15);line(point(x,1.4+phase*.5),point(x,1.8+phase*.5),.12);}
+      line(point(-.5,-1),point(0,-1.5),.04);line(point(.5,-1),point(0,-1.5),.04);
+    }
+    // Two thin rising glints advertise equipment without a screen-filling light column.
+    for(const side of[-1,1]){const a=base.point.add(base.right.scale(side*1.7)).add(base.normal.scale(.55+phase*2.8));this.lines.line(a,a.add(base.normal.scale(.45)),.04,color);}
+  }
   worldPoint(nx,ny){const center=this.screenPoint(0,.85,0),dx=nx*this.width-center.x,dy=center.y-ny*this.height;return{screenAngle:Math.hypot(dx,dy)<8?undefined:Math.atan2(dx,dy)};}
   navigationPoint(nx,ny){const ray=this.scene.createPickingRay(nx*this.engine.getRenderWidth(),ny*this.engine.getRenderHeight(),Matrix.Identity(),this.camera,false);return this.surface.raycast(ray.origin,ray.direction);}
   navigationLocal(){
@@ -241,7 +258,7 @@ export class GameRenderer {
         for(let i=0;i<sections;i++){const f=this.frame(e.x,e.z,3+i*5.4+fall);this.solid('cube',f,new Vector3(3.3,5.1,3.3),e.hit>0?'#efffff':e.color);}
         this.ring(e.x,e.z,3,.14,e.color,e.warmup>0?.12:.05,40);continue;
       }
-      const warm=e.warmup>0?Math.max(.04,1-e.warmup/(e.type==='boss'?2:1.15)):1,kind=({diamond:'diamond',cube:'cube',spinner:'cross',mote:'dart',dart:'dart',prism:'prism',guard:'cube',splitter:'cube',anchor:'cube',boss:'cube'})[e.type];
+      const warm=e.warmup>0?Math.max(.04,1-e.warmup/Math.max(.01,e.spawnWarmup)):1,kind=({diamond:'diamond',cube:'cube',spinner:'cross',mote:'dart',dart:'dart',prism:'prism',guard:'cube',splitter:'cube',anchor:'cube',boss:'cube'})[e.type];
       const size=(e.type==='boss'?5:e.type==='splitter'?3:e.type==='guard'?2:e.type==='anchor'?2.1:1.25)*e.size*warm,frame=this.frame(e.x,e.z,.55+size*.23,e.angle),color=e.hit>0?'#efffff':e.type==='boss'?(e.shielded?'#ff53c9':'#67ffff'):e.color;
       if(Vector3.Dot(frame.normal,this.camera.position.subtract(frame.point))<=.1)continue;
       const spin=e.type==='dart'||e.type==='mote'||e.type==='prism'?0:e.age*(e.type==='spinner'?2.1:.45)+e.phase;
@@ -252,13 +269,12 @@ export class GameRenderer {
         for(let i=0;i<n;i++){const a=t*.8+i*TAU/n,orb={...frame,point:frame.point.add(frame.right.scale(Math.sin(a)*r)).add(frame.forward.scale(Math.cos(a)*r)).add(frame.normal.scale(Math.sin(a*2+t*.6)*.6))};this.solid(e.type==='boss'?'cube':'diamond',orb,e.type==='boss'?.8:.4,color,-spin);}
       }
     }
-    for(const drop of sim.weaponDrops){
-      const w=WEAPONS[drop.weapon],f=this.frame(drop.x,drop.z,1.4,0);this.ring(drop.x,drop.z,1.65,.14,w.color,.075,32);this.ring(drop.x,drop.z,2.2,.12,w.color,.025,24);
-      if(w.summon)for(const side of[-1,1])this.solid('ship',{...f,point:f.point.add(f.right.scale(side*.85))},.75,w.color);
-      else this.solid(drop.weapon%2?'diamond':'cube',f,1.1,w.color,t*.9);
-      this.lines.line(f.point.add(f.normal.scale(-1)),f.point.add(f.normal.scale(4)),.035,w.color);
-      if(drop.weapon>=5&&!w.summon)for(let i=0;i<3;i++){const a=t+i*TAU/3;this.solid('dart',{...f,point:f.point.add(f.right.scale(Math.sin(a))).add(f.forward.scale(Math.cos(a)))},.35,w.color,t);}
+    const reactors=sim.enemies.filter(e=>e.type==='anchor'&&!e.dead);
+    for(let i=0;i<reactors.length;i++)for(let j=i+1;j<reactors.length;j++){
+      const a=reactors[i],b=reactors[j];if(Math.hypot(a.x-b.x,a.z-b.z)>6.5)continue;
+      let previous;for(let k=0;k<=4;k++){const f=k/4,point=v(s.map(a.x+(b.x-a.x)*f,a.z+(b.z-a.z)*f,.32+Math.sin(f*Math.PI)*.35).point);if(previous)this.lines.line(previous,point,.035,'#ffe56b');previous=point;}
     }
+    for(const drop of sim.weaponDrops)this.weaponPickup(drop,t);
     if(sim.exitZone){const z=sim.exitZone;for(let i=0;i<3;i++)this.ring(z.x,z.z,z.radius+i*.36,.2+i*.2,'#91ff79',.1-i*.025,48);const f=this.frame(z.x,z.z,1.6);this.solid('diamond',f,1.1,'#c1ff99',t);this.lines.line(f.point,f.point.add(f.normal.scale(7)),.065,'#91ff79');}
     if(this.navigationTarget||this.navigationEntity){const goal=this.navigationLocal();if(goal)this.ring(goal.x,goal.z,.65+Math.sin(t*6)*.08,.25,'#e4ffff',.055,24);}
     const groups=new Map();
@@ -289,6 +305,7 @@ export class GameRenderer {
       }
     }
     const particleStep=Math.max(1,Math.ceil(sim.particles.length/(sim.reduced?100:320)));
+    for(const fragment of sim.fragments.slice(-(sim.reduced?12:32))){if(Math.hypot(fragment.x,fragment.z)>30)continue;this.solid('cube',this.frame(fragment.x,fragment.z,fragment.y,fragment.spin),fragment.size*Math.min(1,fragment.life*3),fragment.color,fragment.spin+t*5);}
     for(let i=0;i<sim.particles.length;i+=particleStep){const particle=sim.particles[i];if(Math.hypot(particle.x,particle.z)>34)continue;
       const life=particle.life/particle.maxLife,f=this.frame(particle.x,particle.z,Math.max(.2,particle.y*.4),Math.atan2(particle.vx,particle.vz));
       const length=(.18+particle.size*8)*life;this.lines.line(f.point,f.point.add(f.forward.scale(length)),Math.max(.025,particle.size*1.4*life),particle.color);

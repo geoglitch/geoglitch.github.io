@@ -1,5 +1,6 @@
 import { CONFIG, COLORS, WEAPONS, UPGRADES, DRONES } from './config.js';
 import { LEVELS, BOSS_NAMES } from './levels.js';
+import { wavePosition } from './waves.js';
 import { TAU, clamp, damp, lerp, distance, rng, arenaRadiusAt, clampToArena, segmentCircle, SpatialGrid, ribbonPoint } from './math.js';
 
 const TYPES = {
@@ -29,12 +30,13 @@ export class Simulation {
   }
   reset(mode = 'playing') {
     this.mode = mode; this.previousMode = mode;
-    this.enemies = []; this.bullets = []; this.particles = [];this.sisters=[];
+    this.enemies = []; this.bullets = []; this.particles = [];this.sisters=[];this.fragments=[];
     this.pickups = []; this.rings = []; this.bolts = []; this.events = [];
     this.attacks=[];this.stains=[];this.hitstop=0;this.weaponDrops=[];this.weaponClock=8;this.weaponNotice=null;this.terrainPulse=0;
     this.time = 0; this.musicBeat = 0; this.worldTime = 0; this.levelTime = 0; this.levelIndex = 0;
     this.level = LEVELS[0]; this.score = 0; this.kills = 0;
-    this.exitZone=null;this.levelKills=0;this.reactorClock=16;this.dashHits=new Set();this.waveCount=0;this.lastWave=null;this.pillarEncounter=false;this.pillarsSpawned=false;
+    this.exitZone=null;this.levelKills=0;this.reactorClock=10;this.dashHits=new Set();this.waveCount=0;this.lastWave=null;this.pillarEncounter=false;this.pillarsSpawned=false;
+    this.wavePacks=new Map();this.wavesCleared=0;this.waveWarning=null;this.sweepNotice=null;this.chainNotice=null;this.scorePulse=0;this.reactorChain=0;this.bestReactorChain=0;this.lastDetonation=-10;
     this.combo = 1; this.comboTime = 0; this.souls = 0; this.credits = 0;
     this.trauma = 0; this.flash = 0; this.spawnClock = 4.8;
     this.bossSpawned = false; this.bossDefeated = false;
@@ -160,7 +162,7 @@ export class Simulation {
     const e = {
       ...proto, id: ++this.id, type, x: x ?? Math.cos(a) * r,
       z: z ?? Math.sin(a) * r * CONFIG.arenaScaleZ,
-      vx: 0, vz: 0, angle: this.rand() * TAU, age: 0, warmup,
+      vx: 0, vz: 0, angle: this.rand() * TAU, age: 0, warmup,spawnWarmup:warmup,
       hit: 0, cd: 1 + this.rand() * 2, phase: this.rand() * TAU,
       state: 'chase', windup: 0, aimX: 0, aimZ: 0,
       orbCD: 0, dead: false, size: .75+this.rand()*.5, stride: this.rand()*10, stagger: 0,
@@ -203,6 +205,9 @@ export class Simulation {
   }
   ring(x, z, color, radius = 4, duration = 0.5) {
     this.rings.push({ x, z, color, radius, life: duration, maxLife: duration });
+  }
+  shatter(x,z,color,count=8){
+    for(let i=0;i<count&&this.fragments.length<48;i++){const a=this.rand()*TAU,speed=4+this.rand()*10,life=.5+this.rand()*.45;this.fragments.push({x,z,y:1,vx:Math.cos(a)*speed,vz:Math.sin(a)*speed,vy:4+this.rand()*8,spin:this.rand()*TAU,size:.16+this.rand()*.3,color,life,maxLife:life});}
   }
   burst() {
     const p = this.player;
@@ -305,7 +310,9 @@ export class Simulation {
     if (e.dead) return;
     e.dead = true; this.kills++;if(e.type!=='anchor')this.levelKills++;
     this.score += Math.round(e.value * this.combo);
+    this.scorePulse=Math.min(1,this.scorePulse+.12);
     const big = e.type === 'boss',tower=e.type==='pillar';
+    if(big||tower||e.type==='anchor'||e.elite||e.type==='guard'||e.type==='splitter')this.shatter(e.x,e.z,e.color,big||tower?20:8);
     this.spark(e.x,e.z,e.color,big||tower?140:44,big||tower?3:1.7);
     this.spark(e.x,e.z,COLORS.white,big?60:13,big?2.5:1.25);
     this.ring(e.x,e.z,e.color,big||tower?15:e.radius*3+1.5,big||tower?1.1:.48);
@@ -321,10 +328,12 @@ export class Simulation {
       for (let i = 0; i < 4; i++) {
         const a = i * TAU / 4,recursive=this.level.number>=31&&e.splitDepth===0;
         const child = this.spawnEnemy(recursive?'splitter':'cube', e.x + Math.cos(a), e.z + Math.sin(a), 0.32);
-        if (child) { child.radius = recursive?.8:.38; child.size = recursive?.85:.48; child.hp = recursive?14:2.5;child.maxHp=child.hp; child.speed = 1.5;child.splitDepth=(e.splitDepth||0)+1;child.vx=Math.cos(a)*14;child.vz=Math.sin(a)*14; }
+        if (child) { child.radius = recursive?.8:.38; child.size = recursive?.85:.48; child.hp = recursive?14:2.5;child.maxHp=child.hp; child.speed = 1.5;child.splitDepth=(e.splitDepth||0)+1;child.vx=Math.cos(a)*14;child.vz=Math.sin(a)*14;child.waveId=e.waveId;const pack=this.wavePacks.get(e.waveId);if(pack)pack.remaining++; }
       }
     }
     if (e.type === 'anchor') {
+      this.reactorChain=this.time-this.lastDetonation<.7?this.reactorChain+1:1;this.lastDetonation=this.time;this.bestReactorChain=Math.max(this.bestReactorChain,this.reactorChain);
+      if(this.reactorChain>1){const bonus=250*Math.min(6,this.reactorChain);this.score+=bonus;this.chainNotice={count:this.reactorChain,bonus,life:1.5};this.emit('reactorChain',{count:this.reactorChain});}
       this.ring(e.x,e.z,COLORS.gold,6.5,.7);this.spark(e.x,e.z,COLORS.gold,55,2);this.emit('explosion',{x:e.x,size:2});
       if (e.size > 0.6) for (let i = 0; i < 3; i++) {
         const a = this.rand() * TAU;
@@ -344,6 +353,14 @@ export class Simulation {
     if (big) {
       this.bossDefeated = true; this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
       this.player.burstCD = 0;
+    }
+    const pack=this.wavePacks.get(e.waveId);
+    if(pack&&--pack.remaining===0){
+      this.wavePacks.delete(e.waveId);
+      if(!pack.abandoned&&this.mode==='playing'){
+        const bonus=Math.round((500+pack.count*40)*Math.min(8,this.combo));this.score+=bonus;this.wavesCleared++;this.scorePulse=1;
+        this.sweepNotice={count:pack.count,bonus,life:1.6};this.ring(this.player.x,this.player.z,COLORS.jade,5,.45);this.emit('waveClear',{count:pack.count,bonus});
+      }
     }
   }
   chainLightning(x, z, count, damage) {
@@ -397,6 +414,8 @@ export class Simulation {
     if (this.mode === 'paused' || this.mode === 'upgrade' || this.mode === 'victory' || this.mode === 'dead') return;
     if (this.mode === 'attract') input = this.demoInput();
     this.time += dt; this.musicBeat += dt * (134 + Math.min(8,this.level.chapter)) / 60; this.levelTime += dt; this.banner = Math.max(0, this.banner - dt);
+    this.scorePulse=Math.max(0,this.scorePulse-dt*3);
+    for(const notice of [this.waveWarning,this.sweepNotice,this.chainNotice])if(notice)notice.life=Math.max(0,notice.life-dt);
     for(const o of this.obstacles)o.warmup=Math.max(0,o.warmup-dt);
     this.arena.mix = Math.min(1, this.arena.mix + dt * 0.3);
     this.arena.rotation = damp(this.arena.rotation, this.arena.targetRotation, 0.6, dt);
@@ -437,14 +456,14 @@ export class Simulation {
     const p = this.player, dx = p.x, dz = p.z;
     p.x = 0; p.z = 0; p.px -= dx; p.pz -= dz;
     if(this.exitZone){this.exitZone.x-=dx;this.exitZone.z-=dz;}
-    for (const list of [this.enemies, this.bullets, this.pickups, this.particles, this.rings, this.bolts, this.supports, this.sisters,this.gates,this.obstacles, this.attacks,this.stains,this.weaponDrops,p.tail]) for (const e of list) {
+    for (const list of [this.enemies, this.bullets, this.pickups, this.particles,this.fragments, this.rings, this.bolts, this.supports, this.sisters,this.gates,this.obstacles, this.attacks,this.stains,this.weaponDrops,p.tail]) for (const e of list) {
       e.x -= dx; e.z -= dz;
       if (e.px !== undefined) { e.px -= dx; e.pz -= dz; }
       if (e.tx !== undefined) { e.tx -= dx; e.tz -= dz; }
       if (e.type === 'prism' || e.type === 'guard') { e.aimX -= dx; e.aimZ -= dz; }
       if (e.trail) for (const point of e.trail) { point.x -= dx; point.z -= dz; }
     }
-    this.enemies = this.enemies.filter(e => e.type === 'boss' || Math.hypot(e.x,e.z) < 65);
+    this.enemies = this.enemies.filter(e => {if(e.type==='boss'||e.type==='pillar'||Math.hypot(e.x,e.z)<65)return true;const pack=this.wavePacks.get(e.waveId);if(pack)pack.abandoned=true;return false;});
     this.grid.clear(); for (const e of this.enemies) if (!e.dead) this.grid.insert(e);
     return { dx, dz };
   }
@@ -519,22 +538,27 @@ export class Simulation {
     if(room<Math.min(6,pressure.group))return 0;
     this.waveCount++;
     const pool=this.time<18?['diamond','cube','spinner']:l.enemies;
-    const swarm=this.time>18&&this.waveCount%3===0;
-    const pattern=swarm?'swarm':this.waveCount%4===0?'pincer':l.pattern;
-    const count=Math.min(room,swarm?Math.max(12,pressure.group*2):demo?8:pressure.group),angle=this.rand()*TAU,packPhase=this.rand()*TAU;
-    const primary=swarm?'mote':pool[Math.floor(this.rand()*pool.length)],secondary=pool[Math.floor(this.rand()*pool.length)];
-    const warmup=3*60/(134+Math.min(8,l.chapter));
+    const surge=!demo&&!l.boss&&this.time>28&&this.waveCount%5===0,swarm=!surge&&this.time>18&&this.waveCount%3===0;
+    const pattern=surge?'surge':swarm?'swarm':this.waveCount%4===0?'pincer':l.pattern;
+    const count=Math.min(room,surge?Math.ceil(pressure.group*1.5):swarm?Math.max(12,pressure.group*2):demo?8:pressure.group),angle=surge?Math.PI/2-p.angle:this.rand()*TAU,packPhase=this.rand()*TAU;
+    const hunter=this.time>25&&pool.includes('dart')?'dart':pool.includes('diamond')?'diamond':pool[0];
+    const primary=swarm?'mote':pattern==='hunt'?hunter:pool[Math.floor(this.rand()*pool.length)],secondary=pool[Math.floor(this.rand()*pool.length)];
+    const warmup=(surge?4:3)*60/(134+Math.min(8,l.chapter));let spawned=0;
     for(let i=0;i<count;i++){
-      const side=pattern==='pincer'?i%2:pattern==='ritual'?i%3:0,sector=angle+(pattern==='pincer'?side*Math.PI:pattern==='ritual'?side*TAU/3:0);
-      const index=pattern==='pincer'?Math.floor(i/2):pattern==='ritual'?Math.floor(i/3):i,spacing=swarm?.78:1.55,columns=Math.ceil(Math.sqrt(count/(pattern==='pincer'?2:pattern==='ritual'?3:1)));
-      const across=(index%columns-(columns-1)/2)*spacing,depth=Math.floor(index/columns)*spacing,r=18+Math.min(5,l.chapter*.45)+depth;
-      const x=p.x+Math.cos(sector)*r-Math.sin(sector)*across,z=p.z+Math.sin(sector)*r+Math.cos(sector)*across;
-      const e=this.spawnEnemy(side===1&&!swarm?secondary:primary,x,z,warmup);
-      if(e){e.packId=this.waveCount*3+side;e.packPhase=packPhase;e.roamAngle=sector+Math.PI/2;}
+      const point=wavePosition(pattern,i,count,angle,l.chapter,swarm),type=surge&&i%3===0?'diamond':point.side===1&&!swarm?secondary:primary;
+      const e=this.spawnEnemy(type,p.x+point.x,p.z+point.z,warmup);
+      if(e){spawned++;e.waveId=this.waveCount;e.packId=this.waveCount*3+point.side;e.packPhase=packPhase;e.roamAngle=point.sector+Math.PI/2;}
     }
-    this.lastWave={count,pattern,type:primary,time:this.time};
-    this.emit('wave',{size:count,color:TYPES[primary].color});
-    return count;
+    this.wavePacks.set(this.waveCount,{count:spawned,remaining:spawned,abandoned:false});if(this.wavePacks.size>12)this.wavePacks.delete(this.wavePacks.keys().next().value);
+    this.lastWave={count:spawned,pattern,type:primary,time:this.time};this.waveWarning={count:spawned,pattern,color:surge?COLORS.pink:TYPES[primary].color,life:warmup,maxLife:warmup};
+    this.emit('wave',{size:spawned,surge,color:TYPES[primary].color});
+    return spawned;
+  }
+  spawnReactorCluster(){
+    const room=Math.min(3-this.enemies.filter(e=>e.type==='anchor'&&!e.dead).length,CONFIG.maxEnemies-this.enemies.length);if(room<2)return 0;
+    const p=this.player,a=p.angle+(this.rand()-.5)*.7,cx=p.x+Math.sin(a)*13,cz=p.z+Math.cos(a)*13;
+    for(let i=0;i<room;i++){const phase=i*TAU/room;this.spawnEnemy('anchor',cx+Math.cos(phase)*3,cz+Math.sin(phase)*3,1.3);}
+    return room;
   }
   updateDirector(dt) {
     const l = this.level;
@@ -553,7 +577,7 @@ export class Simulation {
     this.reactorClock-=dt;
     if(this.curvedWorld&&this.reactorClock<=0){
       this.reactorClock=14+this.rand()*6;
-      if(this.enemies.filter(e=>e.type==='anchor'&&!e.dead).length<3){const p=this.player,a=p.angle+(this.rand()-.5)*1.3,r=13+this.rand()*5;this.spawnEnemy('anchor',p.x+Math.sin(a)*r,p.z+Math.cos(a)*r,1.3);}
+      this.spawnReactorCluster();
     }
     if (l.boss && !this.bossSpawned && this.levelTime > 3) {
       this.bossSpawned = true; this.spawnEnemy('boss', 0, 10, 2);
@@ -589,8 +613,8 @@ export class Simulation {
     const p = this.player,pace=this.pressure().speed;
     for (const e of this.enemies) {
       if (e.dead) continue;
-      if(this.curvedWorld&&e.type==='boss'&&distance(e,p)>36){
-        const a=p.angle+(this.rand()>.5?1:-1)*.65;e.x=p.x+Math.sin(a)*22;e.z=p.z+Math.cos(a)*22;e.vx=0;e.vz=0;e.warmup=1.6;
+      if(this.curvedWorld&&(e.type==='boss'||e.type==='pillar')&&distance(e,p)>36){
+        const a=p.angle+(this.rand()>.5?1:-1)*.65;e.x=p.x+Math.sin(a)*22;e.z=p.z+Math.cos(a)*22;e.vx=0;e.vz=0;e.warmup=e.type==='pillar'?3:1.6;e.spawnWarmup=e.warmup;if(e.type==='pillar'){e.age=0;e.landed=false;}
         this.ring(e.x,e.z,COLORS.pink,5,1.6);this.emit('warning');
       }
       const previousX=e.x,previousZ=e.z;
@@ -879,6 +903,8 @@ export class Simulation {
       if (p.y < 0.08) { p.y = 0.08; p.vy = -p.vy * 0.45; }
     }
     this.particles = this.particles.filter(p => p.life > 0);
+    for(const f of this.fragments){f.life-=dt;f.x+=f.vx*dt;f.z+=f.vz*dt;f.y+=f.vy*dt;f.vy-=22*dt;f.vx*=Math.exp(-dt*2);f.vz*=Math.exp(-dt*2);if(f.y<.15){f.y=.15;f.vy=Math.abs(f.vy)*.35;}}
+    this.fragments=this.fragments.filter(f=>f.life>0);
     for (const r of this.rings) r.life -= dt;
     for (const r of this.bolts) r.life -= dt;
     this.rings = this.rings.filter(r => r.life > 0);

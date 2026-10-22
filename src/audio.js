@@ -70,7 +70,9 @@ export class AudioEngine {
       case'charge':this.noise(.22,.08,700,0,pan,'lowpass');this.tone(520,.28,'sine',.065,260,0,pan,1800);break;
       case'overdrive':this.impact(1.8);[220,330,440,660].forEach((f,i)=>this.tone(f,.35,'sawtooth',.035,f,i*.045,0,2400));break;
       case'sisterDeploy':[220,330,440].forEach((f,i)=>this.tone(f,.22,'triangle',.055,f,i*.045,(i-1)*.4,2600));this.noise(.2,.08,3200);break;
-      case'wave':this.noise(.45,.055,2000);this.tone(180,.35,'sine',.035,320,0,0,900);break;
+      case'wave':this.noise(e.surge?.9:.45,e.surge?.09:.055,2000);this.tone(180,e.surge?.8:.35,'sine',.035,e.surge?620:320,0,0,900);break;
+      case'waveClear':[220,261.63,329.63].forEach((f,i)=>this.tone(f,.22,'sawtooth',.035,f,i*.055,(i-1)*.2,2400));this.noise(.1,.05,4500);break;
+      case'reactorChain':this.tone(65,.3,'sine',.16,28);this.noise(.18,.13,1800);this.tone(330*Math.min(3,e.count),.2,'triangle',.045,660,0,0,3000);break;
       case'warp':this.noise(.35,.12,2800);this.tone(180,.4,'triangle',.08,720,0,0,2400);break;
       case'bossAttack':this.impact(1.3);break;
       case'victory':[130.81,155.56,196,261.63].forEach((f,i)=>this.tone(f,2,'triangle',.08,f,i*.2,0,1000));break;
