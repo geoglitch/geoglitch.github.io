@@ -40,6 +40,7 @@ test('the checked-in engine includes the constructors, shaders and extensions us
   assert.equal(engine.Engine.Version, '8.56.2');
   assert.equal(typeof engine.MeshBuilder.CreateBox, 'function');
   assert.equal(typeof engine.Mesh.prototype.thinInstanceSetBuffer, 'function');
+  assert.equal(typeof engine.Mesh.prototype.thinInstancePartialBufferUpdate, 'function');
   assert.equal(typeof engine.Scene.prototype.createPickingRay, 'function');
   for (const name of ['defaultVertexShader', 'glowMapGenerationVertexShader', 'layerVertexShader']) assert.ok(engine.Effect.ShadersStore[name], name);
 });

@@ -2,10 +2,10 @@
  * GEOMETRY GLITCH — a pure Babylon.js geometric arcade game.
  * Small ship, automatic neon weapons, swarms and deformable 3D surfaces;
  * 50 encounter templates in an endless flow; no backend or runtime CDN.
- * Keyboard: WASD/arrows move; mouse aim/hold fire; Space/Shift dash; E/RMB burst;
+ * Keyboard: WASD/arrows move; mouse turns a stationary ship; Space/Shift dash; E/RMB burst;
  * 1–9 collected weapons; P/Escape pause; M mute; F fullscreen; R retry; ` tuning.
- * Touch: floating left move stick + assisted attacks, optional right aim stick;
- * dedicated 72px dash/burst targets. Gamepad: twin sticks, RT/X attack, A dash.
+ * Touch: floating left move stick + forward fire, right stick steers the nose independently;
+ * dedicated 72px dash/burst targets. Gamepad: left moves, right turns the ship, A/RT dash, B/LT pulse.
  * Fixed 60Hz simulation. All menus, HUD and touch controls rendered by the engine.
  */
 export const CONFIG = {
@@ -46,7 +46,7 @@ export const COLORS = {
 
 export const WEAPONS = [
   { name: 'FILAMENT', color: '#54fff1', interval: 1.25, damage: 2.4, reach: 5, arc: 2.4, knockback: 7, glyph: '∿', hybrid: true },
-  { name: 'ARC LASH', color: '#ff5de9', interval: 1.55, damage: 4.4, reach: 7.2, arc: 2.2, knockback: 10, glyph: '≈' },
+  { name: 'ARC LASH', color: '#ff5de9', interval: 1.55, damage: 4.4, reach: 7.2, arc: 2.2, knockback: 10, autoTarget: true, glyph: '≈' },
   { name: 'ORBIT CUTTER', color: '#ffb14a', interval: 2.9, damage: 5.2, reach: 4.8, arc: Math.PI*2, knockback: 12, glyph: '◎' },
   { name: 'WAVE FAN', color: '#b7ff48', interval: 1.25, damage: 1.7, reach: 20, ranged: true, ammo: 140, count: 5, spread: .14, speed: 40, pierce: 0, glyph: '⋔' },
   { name: 'PULSE LANCE', color: '#a28bff', interval: 1.45, damage: 6.5, reach: 27, ranged: true, ammo: 65, count: 1, spread: 0, speed: 57, pierce: 2, glyph: 'ϟ' },

@@ -12,13 +12,33 @@ test('screen aiming preserves all directions across a banked perspective basis',
     assert.ok(Math.abs(Math.atan2(Math.sin(projected-angle),Math.cos(projected-angle)))<1e-8);
   }
 });
-test('the ship faces travel direction while automatic targeting tracks a separate threat',()=>{
+test('direct fire follows the eased ship heading even with a threat and aim input behind it',()=>{
   const s=arena();s.spawnEnemy('guard',-18,0,0);
   s.updatePlayer(CONFIG.step,{moveX:1});assert.ok(s.player.angle>0&&s.player.angle<.3,'a new heading eases in without snapping');
-  for(let i=0;i<29;i++)s.updatePlayer(CONFIG.step,{moveX:1});
-  assert.ok(Math.abs(s.player.angle-Math.PI/2)<.03);assert.ok(s.player.aim<0);
+  for(let i=0;i<29;i++)s.updatePlayer(CONFIG.step,{moveX:1,aimAngle:-Math.PI/2});
+  assert.ok(Math.abs(s.player.angle-Math.PI/2)<.03);assert.equal(s.player.aim,s.player.angle);
   for(let i=0;i<30;i++)s.updatePlayer(CONFIG.step,{moveZ:1});
   assert.ok(Math.abs(s.player.angle)<.03);
+});
+test('direct projectile weapons launch from the nose in their normal forward spread',()=>{
+  for(const weapon of[0,3,4,5,6]){
+    const s=arena(),p=s.player;s.spawnEnemy('guard',-4,-6,0);p.weapon=weapon;p.ammo[weapon]=100;p.angle=.8;p.aim=-2;
+    s.melee();const shots=s.bullets.filter(b=>b.owner==='player');assert.equal(shots.length,weapon===0?3:WEAPONS[weapon].count);
+    const middle=(shots[0].angle+shots.at(-1).angle)/2;assert.ok(Math.abs(middle-p.angle)<1e-9);
+    for(const shot of shots)assert.ok(Math.cos(shot.angle-p.angle)>.9);
+  }
+});
+test('the whip independently targets a nearby enemy behind the ship without turning the hull',()=>{
+  const s=arena(),p=s.player;p.weapon=1;p.angle=0;const enemy=s.spawnEnemy('guard',0,-4,0);const hp=enemy.hp;
+  s.melee();assert.equal(p.angle,0);assert.ok(Math.abs(Math.abs(s.attacks[0].angle)-Math.PI)<.001);assert.ok(enemy.hp<hp);
+});
+test('whip targeting ignores spawning and out-of-reach enemies and falls back to forward',()=>{
+  const s=arena(),p=s.player;p.weapon=1;p.angle=.4;s.spawnEnemy('guard',0,-2,1);const far=s.spawnEnemy('guard',0,-25,0);far.z=-(WEAPONS[1].reach+far.radius+.1);
+  s.melee();assert.equal(s.attacks[0].angle,p.angle);
+});
+test('switching from the auto-targeted whip to a direct weapon restores nose-aligned fire',()=>{
+  const s=arena(),p=s.player;p.weapon=1;p.angle=0;s.spawnEnemy('guard',0,-4,0);s.melee();
+  p.weapon=4;p.ammo[4]=5;p.shotCD=0;s.melee();assert.equal(s.bullets[0].angle,0);
 });
 test('seeker arrays fire distinct homing missiles without a fire button',()=>{
   const s=arena();s.spawnWeapon(5,0,0);s.updateWeaponDrops(CONFIG.step);s.spawnEnemy('guard',7,11,0);

@@ -78,6 +78,30 @@ Build on the discovery appeal discussed in the Vampire Survivors and Risk of Rai
 
 Recommended order: weapon evolutions, one lure-and-crush trap, then optional caches. Those create immediate choices within the existing navigation and automatic-fire loop. Follow with the director and a small event bag after measuring whether players can identify weapons, read danger and make a deliberate escape. Useful checks: pickup identification at a glance, intentional equipment detours, avoidable versus unreadable deaths, and whether idle firing becomes sufficient to survive.
 
-### Implemented now: equipment that advertises its function
+### Current implementation: grounded equipment and continuous movement
 
-Each ground pickup has an animated native 3D attack display: flexible strings, orbiting blades, five fan lanes, a piercing beam, converging seekers, an expanding nova, two sister ships or a rainbow ribbon. A low plinth and colored corner tabs distinguish equipment from enemies. Larger dark-backed HUD diagrams remain legible against the floor, show a selected-route accent and a direction arrow off screen, and displace to avoid one another, the ship and navigation controls where space permits. Tap regions are at least 48 pixels wide. Collection gives a larger brief attack diagram. There are no text labels beneath pickups, rarity tiers, damage buffs or ammunition balance changes in this pass.
+Static colored attack symbols are drawn directly on the floor, with invisible 56-pixel tap targets over visible symbols. Floating weapon cards, holograms, plinths, light columns, orbiting previews and central pickup popups were removed following play feedback. Weapon colors and functional silhouettes remain in the floor art and bottom inventory.
+
+The flow pass removes simulation-wide melee hit pauses, retains forward momentum after taking damage, and resolves ridge contact with precise clipping and tangential sliding. Tap routes aim ahead through clear waypoints. Keyboard and controller movement use the camera's projected screen basis. Controller dead zones scale continuously. The camera follows the large underlying shape independently of small ridges and pulse ripples, with eased angular speed and a continuous clearance search. Rendering reuses surface projections and uploads only active instance colors. Long projection discontinuities and lines crossing behind the camera are discarded. These are implementation choices responding to observed interruptions; browser checks and regression tests are documented in the playtest notes.
+
+### Selective targeting
+
+Direct-fire modules now launch along the ship's facing direction, preserving the connection between navigation and attack. Arc Lash is the close-range automatic-targeting exception. Seeker Array launches forward before homing; companion fire retains independent targeting. The ribbon stays in front and the Orbit Cutter remains an area weapon. This is a weapon-role change requested during play, rather than a new global aim-assistance mode.
+
+### Control and combat comparison — 22 October 2026
+
+| Reference | Verified idea | Adaptation in Geometry Glitch |
+| --- | --- | --- |
+| [Geometry Wars 3 iOS controls](https://support.activision.com/de/geometry-wars-3-dimensions/articles/geometry-wars-3-dimensions-for-ios) | Draggable, free and fixed stick layouts, plus controller support | A floating touch stick follows a long thumb drag, with radial response and a continuous dead zone. Taps remain destinations. A cancelled or released drag cannot become a tap. |
+| [Resogun hands-on](https://blog.playstation.com/2013/10/18/hands-on-with-resogun-old-school-shooting-new-school-tech/) | Separate movement/fire sticks, boost/bombs/overdrive, readable attack patterns and large bosses | Right-stick input turns the physical nose while the left stick strafes. A/RT boosts; B/LT pulses. Three rotating armor locks require different approach angles before the core opens. These locks are our positioning-based adaptation, not a claim to reproduce a specific Resogun boss. |
+| [Sektori developer description](https://store.steampowered.com/app/2105620/Sektori/) | Authored waves, enemies and bosses layered across changing fields; techno informs the presentation | Larger mixed waves retain warnings and breathing gaps but spread out rather than form tight blocks. Predictive hunters, circling cut-ins, baiting cubes and locked charges give shapes distinct intentions. The original soundtrack now has a bass groove, melodic question/answer, drops and breakdowns. |
+
+Weapon excitement comes from distinct emitters and attacks rather than a universal damage increase. The Fan draws a broad moving front, the Lance has piercing rails, missiles create a small impact splash, the Nova clears nearby hostile fire, and the short ribbon has multiple bright strands. Their existing ammo, range and cooldown limits remain. Ground gradients stay anchored in world space, so colors do not swim under navigation. Combat textures are quieter, varied and throttled; energy squares use unpitched grains instead of constant beeps.
+
+The usability pass also prevents a launch/resume input from spending a boost, gives a new pickup a short protection window without healing, keeps an approach locked to one boss port until it breaks, and clears debug invulnerability on a new run. Browser and automated observations are recorded in the playtest notes; real controller and phone hardware remain unverified.
+
+### Gameplay consistency pass — 23 October 2026
+
+The gameplay pass prioritizes the existing loop over adding more systems. Ridge collision is shared by the ship, grounded enemies and projectiles, so visible obstructions support consistent tactics. Mouse aiming can be held independently of movement. Incidental pickups preserve a selected weapon, while tapping a field symbol expresses an explicit equip choice. A bounded delay in new-wave spawning creates breathing room after damage or immediate crowding without weakening existing threats.
+
+Normal and focused browser runs exposed a boss range mismatch, accidental automatic gate traversal, a sharp final-lock/core transition, and camera lag on fast curved travel. These were corrected and regression-tested. Portrait framing follows the world mass, and reduced cosmetic draw budgets preserve the enemy and collision simulation. The playtest log separates normal survival, focused encounter checks and automated evidence; fun and long-term balance still require sustained player sessions.

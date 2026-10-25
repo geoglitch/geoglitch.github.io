@@ -1,5 +1,23 @@
 import { WEAPONS } from './config.js';
 
+export const radialStick=(x,z,deadzone=.18)=>{const length=Math.hypot(x,z),amount=Math.min(1,Math.max(0,(length-deadzone)/(1-deadzone)));return length>deadzone?{x:x/length*amount,z:z/length*amount}:{x:0,z:0};};
+
+// Render frames can be faster than the fixed simulation. Keep edges until one
+// simulation step consumes them, without replaying them during catch-up steps.
+export class GameplayInputBuffer {
+  constructor() { this.clear(); }
+  clear() { this.dash=false;this.burst=false;this.weapon=undefined; }
+  capture(frame, active=true) {
+    if(!active){this.clear();return;}
+    this.dash ||= frame.dash;this.burst ||= frame.burst;
+    if(Number.isInteger(frame.weapon))this.weapon=frame.weapon;
+  }
+  consume(frame) {
+    const result={...frame,dash:this.dash,burst:this.burst,weapon:this.weapon};
+    this.clear();return result;
+  }
+}
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas; this.keys = new Set(); this.pressed = new Set();
@@ -18,7 +36,8 @@ export class Input {
     canvas.addEventListener('pointerdown', e => {e.preventDefault();this.pointerDown(e);},{passive:false});
     canvas.addEventListener('pointermove', e => this.pointerMove(e));
     canvas.addEventListener('pointerup', e => this.pointerUp(e));
-    canvas.addEventListener('pointercancel', e => this.pointerUp(e));
+    canvas.addEventListener('pointercancel', e => this.pointerUp(e,true));
+    canvas.addEventListener('lostpointercapture', e => this.cancelPointer(e.pointerId));
     window.addEventListener('gamepaddisconnected', () => { this.padButtons = []; });
   }
   pos(e) {
@@ -30,18 +49,18 @@ export class Input {
     this.canvas.focus({ preventScroll: true });
     this.canvas.setPointerCapture(e.pointerId);
     const p = this.pos(e);
-    this.actions.push({ type: 'tap', x: p.nx, y: p.ny, button: e.button });
     if (e.pointerType === 'touch') {
       this.touch = true;
-      const t = { id: e.pointerId, x: p.x, y: p.y, ox: p.x, oy: p.y, nx: p.nx, ny: p.ny };
+      const t = { id: e.pointerId, x: p.x, y: p.y, ox: p.x, oy: p.y, sx:p.x,sy:p.y,dragged:false,nx: p.nx, ny: p.ny };
       this.touches.set(e.pointerId, t);
       const action=this.onTouchButton?.(p.nx,p.ny);
       if(action){t.button=true;t.attack=action==='strike';return;}
       if (p.nx < 0.5 && !this.left) this.left = t;
       else if (!this.right) this.right = t;
     } else {
+      this.touch = false;
       this.mouse.x = p.nx; this.mouse.y = p.ny; this.mouse.active = true;
-      this.mouse.press={x:p.x,y:p.y,button:e.button};
+      this.mouse.press={id:e.pointerId,x:p.x,y:p.y,button:e.button,time:performance.now(),dragged:false};
       if (e.button === 0) this.mouse.down = true;
       if (e.button === 2) this.pressed.add('Burst');
     }
@@ -50,52 +69,60 @@ export class Input {
     const p = this.pos(e);
     if (e.pointerType === 'touch') {
       const t = this.touches.get(e.pointerId);
-      if (t) { t.x = p.x; t.y = p.y; t.nx = p.nx; t.ny = p.ny; }
-    } else { this.mouse.x = p.nx; this.mouse.y = p.ny; this.mouse.active = true; }
+      if(t){
+        t.x=p.x;t.y=p.y;t.nx=p.nx;t.ny=p.ny;
+        t.dragged ||= Math.hypot(t.x-t.sx,t.y-t.sy)>=12;
+        if(!t.button){const dx=t.x-t.ox,dy=t.y-t.oy,length=Math.hypot(dx,dy);if(length>52){t.ox=t.x-dx/length*52;t.oy=t.y-dy/length*52;}}
+      }
+    } else { this.mouse.x = p.nx; this.mouse.y = p.ny; this.mouse.active = true;if(this.mouse.press)this.mouse.press.dragged ||= Math.hypot(p.x-this.mouse.press.x,p.y-this.mouse.press.y)>=12; }
   }
-  pointerUp(e) {
+  pointerUp(e,cancelled=false) {
     const p=this.pos(e);
     if (e.pointerType === 'touch') {
       const t=this.touches.get(e.pointerId);
-      if(t&&!t.button&&Math.hypot(t.x-t.ox,t.y-t.oy)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
+      if(t&&!cancelled&&!t.button&&!t.dragged&&Math.hypot(p.x-t.sx,p.y-t.sy)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
       if (this.left?.id === e.pointerId) this.left = null;
       if (this.right?.id === e.pointerId) this.right = null;
       this.touches.delete(e.pointerId);
     } else if (e.button === 0){
-      if(this.mouse.press?.button===0&&Math.hypot(p.x-this.mouse.press.x,p.y-this.mouse.press.y)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
+      if(!cancelled&&this.mouse.press?.button===0&&!this.mouse.press.dragged&&performance.now()-this.mouse.press.time<280&&Math.hypot(p.x-this.mouse.press.x,p.y-this.mouse.press.y)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
       this.mouse.down=false;this.mouse.press=null;
     }
   }
-  clear() { this.keys.clear(); this.pressed.clear(); this.mouse.down = false;this.mouse.press=null; this.left = null; this.right = null; this.touches.clear(); }
+  cancelPointer(id) {
+    if(this.left?.id===id)this.left=null;
+    if(this.right?.id===id)this.right=null;
+    this.touches.delete(id);
+    if(this.mouse.press?.id===id){this.mouse.down=false;this.mouse.press=null;}
+  }
+  clear() { this.keys.clear(); this.pressed.clear();this.actions.length=0; this.mouse.down = false;this.mouse.active=false;this.mouse.press=null; this.left = null; this.right = null; this.touches.clear();this.onClear?.(); }
   just(code) { return this.pressed.has(code); }
   down(...codes) { return codes.some(c => this.keys.has(c)); }
   getFrame(worldPoint) {
     let moveX = Number(this.down('KeyD', 'ArrowRight')) - Number(this.down('KeyA', 'ArrowLeft'));
     let moveZ = Number(this.down('KeyW', 'ArrowUp')) - Number(this.down('KeyS', 'ArrowDown'));
-    let aimX = worldPoint?.x, aimZ = worldPoint?.z, aimAngle=worldPoint?.screenAngle;
+    let aimX = worldPoint?.x, aimZ = worldPoint?.z, aimAngle=worldPoint?.screenAngle,manualAim=this.mouse.down&&this.mouse.active&&!this.touch&&Number.isFinite(worldPoint?.screenAngle);
     let fire = this.mouse.down || this.down('KeyJ') || this.just('Strike') || [...this.touches.values()].some(t=>t.attack), assist = this.down('KeyJ')&&!this.mouse.active;
     if (this.left) {
-      moveX = Math.max(-1, Math.min(1, (this.left.x - this.left.ox) / 52));
-      moveZ = Math.max(-1, Math.min(1, (this.left.oy - this.left.y) / 52));
+      const move=radialStick((this.left.x-this.left.ox)/52,(this.left.oy-this.left.y)/52,.10);moveX=move.x;moveZ=move.z;
       aimX = undefined; aimZ = undefined; assist = true;
     }
     if (this.right) {
       const dx = this.right.x - this.right.ox, dy = -(this.right.y - this.right.oy);
-      if (Math.hypot(dx, dy) > 9) { aimAngle = Math.atan2(dx, dy); fire = true; assist = false; }
+      if (Math.hypot(dx, dy) > 9) { aimAngle = Math.atan2(dx, dy);manualAim=true; fire = true; assist = false; }
       aimX = undefined; aimZ = undefined;
     }
     let dash = this.just('Space') || this.just('ShiftLeft') || this.just('Dash');
     let burst = this.just('KeyE') || this.just('Burst');
     let weapon = WEAPONS.map((_,i)=>i).find(i => this.just(`Digit${i + 1}`));
-    const pad = navigator.getGamepads?.()[0];
+    const pad=Array.from(navigator.getGamepads?.()||[]).find(p=>p&&p.connected!==false);
     if (pad) {
-      const dead = v => Math.abs(v) < 0.18 ? 0 : v;
-      const lx = dead(pad.axes[0] || 0), ly = dead(-(pad.axes[1] || 0));
+      const left=radialStick(pad.axes[0]||0,-(pad.axes[1]||0)),lx=left.x,ly=left.z;
       if (Math.hypot(lx, ly) > 0) { moveX = lx; moveZ = ly; aimX = undefined; aimZ = undefined;aimAngle=undefined; assist = true; }
-      const rx = dead(pad.axes[2] || 0), ry = dead(-(pad.axes[3] || 0));
-      if (Math.hypot(rx, ry) > 0.2) { aimAngle = Math.atan2(rx, ry); aimX = undefined; aimZ = undefined; fire = true; assist = false; }
+      const right=radialStick(pad.axes[2]||0,-(pad.axes[3]||0)),rx=right.x,ry=right.z;
+      if (Math.hypot(rx, ry) > .05) { aimAngle = Math.atan2(rx, ry);manualAim=true; aimX = undefined; aimZ = undefined; fire = true; assist = false; }
       const just = i => pad.buttons[i]?.pressed && !this.padButtons[i];
-      dash ||= just(0); burst ||= just(1) || just(6);
+      dash ||= just(0)||just(7); burst ||= just(1) || just(6);
       fire ||= !!pad.buttons[7]?.pressed || !!pad.buttons[2]?.pressed;
       if (just(4)) weapon = -1; if (just(5)) weapon = -2;
       if (just(9)) this.pressed.add('Escape');
@@ -107,7 +134,7 @@ export class Input {
       this.padNav = nav;
       this.padButtons = pad.buttons.map(b => b.pressed);
     }
-    return { moveX, moveZ, aimX, aimZ, aimAngle, fire, assist, dash, burst, weapon };
+    return { moveX, moveZ, aimX, aimZ, aimAngle, manualAim, fire, assist, dash, burst, weapon };
   }
   endFrame() { this.pressed.clear(); this.actions.length = 0; }
 }

@@ -70,7 +70,8 @@ test('boss defeats continue seamlessly beyond the initial fifty encounter patter
   const s = new Simulation(); s.start(); s.enemies = [];
   s.levelIndex = 49; s.level = LEVELS[49];
   const boss = s.spawnEnemy('boss', 0, 10, 0);
-  s.damageEnemy(boss, 100000);
+  for(let i=0;i<3;i++){const a=boss.portAngle+i*Math.PI*2/3;s.damageEnemy(boss,100000,false,{x:boss.x+Math.sin(a)*8,z:boss.z+Math.cos(a)*8});}
+  s.damageEnemy(boss,100000);
   assert.equal(s.mode,'playing');assert.equal(s.bossDefeated,true);assert.ok(s.score>=6000);
   s.nextLevel();assert.equal(s.level.number,51);assert.ok(s.level.intensity>LEVELS[0].intensity);assert.equal(s.mode,'playing');
 });

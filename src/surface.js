@@ -15,10 +15,7 @@ export function shapeDistance(p, shape, time = 0, floorPhase = 0) {
   }
   if (shape === 1) { // Bevelled monolith: genuinely connected faces and edges.
     const qx = Math.abs(x) - 10, qy = Math.abs(y) - 18, qz = Math.abs(z) - 10;
-    const body=Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - 2.1;
-    const lx=Math.abs(x)-12.2,ly=Math.abs(Math.abs(y)-10)-2.2,lz=Math.abs(z)-11.3;
-    const ledge=Math.hypot(Math.max(lx,0),Math.max(ly,0),Math.max(lz,0))+Math.min(Math.max(lx,ly,lz),0)-1.1;
-    return Math.min(body,ledge);
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - 5.5;
   }
   if (shape === 2) { // Deep elliptical globe.
     return (Math.hypot(x / 14, y / 22, z / 14) - 1) * 14;
@@ -43,11 +40,11 @@ export function shapeDistance(p, shape, time = 0, floorPhase = 0) {
 export class Surface {
   constructor() {
     this.from = 1; this.to = 1; this.mix = 1; this.time = 0; this.level = 1;
-    this.anchor = V(2, -12, -13); this.normal = V(0, 0, -1);
+    this.anchor = V(0, 0, -24.025); this.normal = V(0, 0, -1);
     this.right = V(1, 0, 0); this.up = V(0, 1, 0); this.travel = 0;
     this.floorPhase=0;this.floorTarget=0;this.pulseAge=10;this.pulseOrigin={...this.anchor};
-    this.worldScale=1.05;this.scaleTarget=1.05;
-    this.morphProgress=1;this.blocked=false;this.gateCenters=[];this.landingCenters=[];this.route=[];this.routeAge=10;
+    this.worldScale=1.55;this.scaleTarget=1.55;this.terrainStrength=0;
+    this.morphProgress=1;this.heightCache=new Map();this.blocked=false;this.gateCenters=[];this.landingCenters=[];this.route=[];this.routeAge=10;
   }
   triggerPulse() {this.floorTarget+=Math.PI/2;this.pulseAge=0;this.pulseOrigin={...this.anchor};}
   pulseOffset(p) {
@@ -61,16 +58,26 @@ export class Surface {
     const gate=Math.min(1,Math.max(0,(Math.abs(Math.sin(p.x*.15+p.z*.16))-.1)/.4));
     if(ridge*gate<.0001)return 0;
     let opening=1;for(let i=0;i<this.gateCenters.length+this.landingCenters.length;i++){const center=i<this.gateCenters.length?this.gateCenters[i]:this.landingCenters[i-this.gateCenters.length],t=Math.max(0,Math.min(1,(Math.hypot(p.x-center.x,p.y-center.y,p.z-center.z)-2.3)/2));opening*=t*t*(3-2*t);}
-    return ridge*gate*3.1*opening;
+    return ridge*gate*3.1*opening*this.terrainStrength;
   }
   distance(p) {
     const q=mul(p,1/this.worldScale);
-    return (mix(shapeDistance(q,this.from,this.time,this.floorPhase),shapeDistance(q,this.to,this.time,this.floorPhase),this.mix)*this.worldScale-this.ridgeHeight(p)-this.pulseOffset(p))*.8;
+    const base=this.mix>=1?shapeDistance(q,this.to,this.time,this.floorPhase):this.mix<=0?shapeDistance(q,this.from,this.time,this.floorPhase):mix(shapeDistance(q,this.from,this.time,this.floorPhase),shapeDistance(q,this.to,this.time,this.floorPhase),this.mix);
+    return (base*this.worldScale-this.ridgeHeight(p)-this.pulseOffset(p))*.8;
   }
   gradient(p) {
     const e = 0.015;
     return V((this.distance(V(p.x + e, p.y, p.z)) - this.distance(V(p.x - e, p.y, p.z))) / (2 * e), (this.distance(V(p.x, p.y + e, p.z)) - this.distance(V(p.x, p.y - e, p.z))) / (2 * e), (this.distance(V(p.x, p.y, p.z + e)) - this.distance(V(p.x, p.y, p.z - e))) / (2 * e));
   }
+  viewFrame(){
+    // Follow the large shape, so a ridge or shockwave cannot bounce the camera.
+    const field=p=>mix(shapeDistance(mul(p,1/this.worldScale),this.from,this.time),shapeDistance(mul(p,1/this.worldScale),this.to,this.time),this.mix)*this.worldScale,e=.035;
+    const gradient=p=>V((field(V(p.x+e,p.y,p.z))-field(V(p.x-e,p.y,p.z)))/(2*e),(field(V(p.x,p.y+e,p.z))-field(V(p.x,p.y-e,p.z)))/(2*e),(field(V(p.x,p.y,p.z+e))-field(V(p.x,p.y,p.z-e)))/(2*e));
+    let point={...this.anchor};
+    for(let i=0;i<4;i++){const d=field(point),g=gradient(point),length=dot(g,g);if(Math.abs(d)<.005||length<.00001)break;const move=mul(g,-d/length),size=Math.hypot(move.x,move.y,move.z);point=add(point,size>1.5?mul(move,1.5/size):move);}
+    const normal=unit(gradient(point));return {point,normal:Math.hypot(normal.x,normal.y,normal.z)>.5?normal:this.normal};
+  }
+  viewNormal(){return this.viewFrame().normal;}
   project(point, iterations = 5) {
     let p = { ...point };
     for (let i = 0; i < iterations; i++) {
@@ -104,36 +111,70 @@ export class Surface {
   }
   update(dt, level) {
     this.time += dt;
+    // Learn the movement and weapons on open ground. Solid barriers emerge
+    // progressively as the run changes, instead of trapping the opening ship.
+    const terrainTarget=Math.max(0,Math.min(1,(level-1)/3));
+    this.terrainStrength+=(terrainTarget-this.terrainStrength)*(1-Math.exp(-dt*.5));
     this.routeAge+=dt;
     this.pulseAge+=dt;this.floorPhase+=(this.floorTarget-this.floorPhase)*(1-Math.exp(-dt*1.1));
-    if (level !== this.level&&this.morphProgress>=1) { this.level = level; this.from = this.to; this.to = [1,0,4,2,3,5][(level - 1) % 6]; this.morphProgress=0;this.mix = 0;this.scaleTarget=[1.05,.88,1.18,1.32,1,.92,1.2][(level-1)%7]*(1+Math.min(9,Math.floor((level-1)/5))*.025); }
+    if (level !== this.level&&this.morphProgress>=1) { this.level = level; this.from = this.to; this.to = [1,0,4,2,3,5][(level - 1) % 6]; this.morphProgress=0;this.mix = 0;this.scaleTarget=[1.55,1.4,1.7,1.65,1.45,1.5,1.75][(level-1)%7]*(1+Math.min(9,Math.floor((level-1)/5))*.012); }
     this.worldScale+=(this.scaleTarget-this.worldScale)*(1-Math.exp(-dt*.35));
     this.morphProgress=Math.min(1,this.morphProgress+dt/6.5);
     this.mix=this.morphProgress*this.morphProgress*(3-2*this.morphProgress);
     this.advance(0, 0);
   }
+  terrainHeight(x,z){
+    if(Math.abs(x)+Math.abs(z)<.00001)return this.ridgeHeight(this.anchor);
+    const key=`${x},${z}`;if(this.heightCache.has(key))return this.heightCache.get(key);
+    const point=this.project(add(this.anchor,add(mul(this.right,x),mul(this.up,z))),Math.hypot(x,z)>25?10:6),height=this.ridgeHeight(point);
+    this.heightCache.set(key,height);return height;
+  }
+  terrainFraction(x,z,dx,dz){
+    const limit=Math.max(.72,this.terrainHeight(x,z)+.00001),steps=Math.min(16,Math.max(1,Math.ceil(Math.hypot(dx,dz)/.3)));
+    for(let i=1;i<=steps;i++)if(this.terrainHeight(x+dx*i/steps,z+dz*i/steps)>limit){
+      let lo=(i-1)/steps,hi=i/steps;for(let j=0;j<6;j++){const mid=(lo+hi)/2;if(this.terrainHeight(x+dx*mid,z+dz*mid)>limit)hi=mid;else lo=mid;}
+      return Math.max(0,lo-.0001);
+    }
+    return 1;
+  }
+  resolveActorMotion(x,z,dx,dz){
+    if(Math.hypot(dx,dz)<.00001)return{x:dx,z:dz,blocked:false};
+    const full=this.terrainFraction(x,z,dx,dz);if(full===1)return{x:dx,z:dz,blocked:false};
+    const fraction=(a,b)=>this.terrainFraction(x,z,a,b),fx=fraction(dx,0),fz=fraction(0,dz);
+    const options=[{x:dx*full,z:dz*full},{x:dx*fx,z:0},{x:0,z:dz*fz}];
+    const gx=this.terrainHeight(x+.08,z)-this.terrainHeight(x-.08,z),gz=this.terrainHeight(x,z+.08)-this.terrainHeight(x,z-.08),length=Math.hypot(gx,gz);
+    if(length>.00001){const nx=gx/length,nz=gz/length,into=Math.max(0,dx*nx+dz*nz),a=dx-nx*into,b=dz-nz*into,f=fraction(a,b);options.push({x:a*f,z:b*f});}
+    const move=options.sort((a,b)=>(b.x*dx+b.z*dz)-(a.x*dx+a.z*dz))[0];return{...move,blocked:true};
+  }
   resolveMotion(dx,dz){
-    if(Math.hypot(dx,dz)<.00001)return {x:dx,z:dz};
-    const current=this.ridgeHeight(this.anchor),limit=Math.max(.72,current+.00001);
-    const fraction=(x,z)=>{const steps=Math.min(12,Math.max(1,Math.ceil(Math.hypot(x,z)/.3)));for(let i=1;i<=steps;i++){const q=this.project(add(this.anchor,add(mul(this.right,x*i/steps),mul(this.up,z*i/steps))),6);if(this.ridgeHeight(q)>limit)return (i-1)/steps;}return 1;};
-    const full=fraction(dx,dz);this.blocked=full<1;if(full===1)return{x:dx,z:dz};
-    const fx=fraction(dx,0),fz=fraction(0,dz),options=[{x:dx*full,z:dz*full},{x:dx*fx,z:0},{x:0,z:dz*fz}];
-    return options.sort((a,b)=>(b.x*dx+b.z*dz)-(a.x*dx+a.z*dz))[0];
+    const move=this.resolveActorMotion(0,0,dx,dz);this.blocked=move.blocked;return{x:move.x,z:move.z};
+  }
+  gateObstructs(x,z){
+    return(this.routeAvoid||[]).some(g=>Math.hypot(x-g.x,z-g.z)<Math.min(2.5,Math.hypot(g.x,g.z))-.0001);
   }
   steerTowards(goal){
     const d=Math.max(.01,Math.hypot(goal.x,goal.z));
     const changed=!this.routeGoal||Math.hypot(goal.x-this.routeGoal.x,goal.z-this.routeGoal.z)>2;
     if(changed||this.routeAge>.8){this.route=this.findRoute(goal);this.routeAge=0;this.routeGoal={...goal};}
     while(this.route.length&&Math.hypot(this.route[0].x,this.route[0].z)<.85)this.route.shift();
-    const waypoint=this.route[0]||goal,a=Math.atan2(waypoint.x,waypoint.z);
-    for(const turn of[0,.52,-.52,1.05,-1.05,1.57,-1.57,2.1,-2.1,2.65,-2.65,Math.PI]){const x=Math.sin(a+turn),z=Math.cos(a+turn),step=this.resolveMotion(x*.3,z*.3);if(Math.hypot(step.x,step.z)>.26)return{x:x*Math.min(1,d/1.3),z:z*Math.min(1,d/1.3)};}
+    let waypoint=this.route[0]||goal;
+    // Aim ahead through open corners instead of snapping between adjacent grid cells.
+    const limit=Math.max(.72,this.ridgeHeight(this.anchor)+.00001);
+    for(const point of this.route.slice(1,5)){
+      const length=Math.hypot(point.x,point.z);if(length>4.5)break;
+      const steps=Math.ceil(length/.4);let clear=true;
+      for(let i=1;i<=steps;i++){const x=point.x*i/steps,z=point.z*i/steps;if(this.ridgeHeight(this.map(x,z).point)>limit||this.gateObstructs(x,z)){clear=false;break;}}
+      if(!clear)break;waypoint=point;
+    }
+    const a=Math.atan2(waypoint.x,waypoint.z);
+    for(const turn of[0,.52,-.52,1.05,-1.05,1.57,-1.57,2.1,-2.1,2.65,-2.65,Math.PI]){const x=Math.sin(a+turn),z=Math.cos(a+turn),step=this.resolveMotion(x*.3,z*.3);if(!this.gateObstructs(x*.4,z*.4)&&Math.hypot(step.x,step.z)>.26)return{x:x*Math.min(1,d/1.3),z:z*Math.min(1,d/1.3)};}
     return{x:0,z:0};
   }
   findRoute(goal){
     // Search the local surface chart, then replan as parallel transport changes it.
     // Sampling edge midpoints keeps narrow ridges solid between adjacent cells.
     const spacing=1.35,extent=24,limit=Math.max(.72,this.ridgeHeight(this.anchor)+.00001),cache=new Map();
-    const clear=(x,z)=>{const key=`${x},${z}`;if(!cache.has(key))cache.set(key,!(this.routeAvoid||[]).some(g=>Math.hypot(g.x,g.z)>3&&Math.hypot(x-g.x,z-g.z)<2.5)&&this.ridgeHeight(this.map(x,z).point)<=limit);return cache.get(key);};
+    const clear=(x,z)=>{const key=`${x},${z}`;if(!cache.has(key))cache.set(key,!this.gateObstructs(x,z)&&this.ridgeHeight(this.map(x,z).point)<=limit);return cache.get(key);};
     const heuristic=(x,z)=>Math.hypot(goal.x-x*spacing,goal.z-z*spacing);
     const start={x:0,z:0,g:0,h:heuristic(0,0),parent:null},open=[start],seen=new Map([['0,0',start]]);let best=start;
     for(let count=0;open.length&&count<1200;count++){
@@ -150,6 +191,7 @@ export class Surface {
     const route=[];for(let node=best;node.parent;node=node.parent)route.unshift({x:node.x*spacing,z:node.z*spacing});return route;
   }
   advance(dx, dz) {
+    this.heightCache.clear();
     this.travel += Math.hypot(dx, dz);
     if(this.routeGoal){this.routeGoal.x-=dx;this.routeGoal.z-=dz;for(const point of this.route){point.x-=dx;point.z-=dz;}}
     this.anchor = this.project(add(this.anchor, add(mul(this.right, dx), mul(this.up, dz))), 8);
@@ -175,9 +217,8 @@ export class Surface {
       if (d < 0.025) return p;
       t += Math.max(0.025, d * 0.6);
     }
-    const denom = dot(direction, this.normal);
-    if (Math.abs(denom) < 0.001) return this.anchor;
-    const tPlane = dot(add(this.anchor, mul(origin, -1)), this.normal) / denom;
-    return add(origin, mul(direction, Math.max(0, tPlane)));
+    // Sky and holes are not walkable targets. A tangent-plane fallback can send
+    // the ship behind the visible world when the player taps empty space.
+    return null;
   }
 }

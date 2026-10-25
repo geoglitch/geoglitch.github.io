@@ -1,17 +1,16 @@
 import { CONFIG, COLORS, WEAPONS, DRONES } from './config.js';
 import { clamp, TAU } from './math.js';
-import { layoutWeaponBeacons } from './weapon-beacons.js';
 
 const FONT = '"Space Grotesk", monospace';
 const DISPLAY = '"Barlow Condensed", Impact, sans-serif';
-const settings = ['SOUND', 'MUSIC', 'REDUCED FX', 'TOUCH AIM', 'FULLSCREEN', 'DRONE'];
+const settings = ['SOUND', 'MUSIC', 'REDUCED FX', 'FULLSCREEN', 'DRONE'];
 const tuning = ['speed', 'acceleration', 'dashSpeed', 'dashCooldown', 'fireInterval', 'bulletSpeed', 'enemySpeed', 'spawnInterval', 'pickupRadius', 'shake', 'bloom', 'volume'];
 
 export class HUD {
   constructor(sim, renderer, input, audio) {
     this.sim = sim; this.renderer = renderer; this.input = input; this.audio = audio;
     this.settingsOpen = false; this.tuningOpen = false; this.tuningRow = 0;
-    this.menuRow = 0; this.assistedTouch = true; this.hitAreas = [];
+    this.menuRow = 0; this.hitAreas = [];
     this.fps = 60; this.debug = false; this.width = 0; this.height = 0;
   }
   text(ctx, text, x, y, size = 12, color = COLORS.white, align = 'left', weight = 400, family = FONT) {
@@ -33,7 +32,12 @@ export class HUD {
     fill ? ctx.fill() : ctx.stroke();
   }
   area(id, x, y, w, h) { this.hitAreas.push({ id, x, y, w, h }); }
-  hit(nx, ny) { const x = nx * this.width, y = ny * this.height; return [...this.hitAreas].reverse().find(a => x >= a.x && x <= a.x + a.w && y >= a.y && y <= a.y + a.h)?.id; }
+  hit(nx, ny) {
+    const x=nx*this.width,y=ny*this.height,areas=[...this.hitAreas].reverse().filter(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h);
+    // HUD controls keep priority. Where world markers overlap, the symbol
+    // nearest the finger wins instead of whichever happened to be drawn last.
+    return (areas.find(a=>!a.id.startsWith('navigate'))||areas.sort((a,b)=>Math.hypot(x-a.x-a.w/2,y-a.y-a.h/2)-Math.hypot(x-b.x-b.w/2,y-b.y-b.h/2))[0])?.id;
+  }
   draw(ctx, w, h) {
     this.width = w; this.height = h; this.hitAreas = [];
     const sim = this.sim, p = sim.player, t = sim.worldTime, mobile = w < 760;
@@ -70,6 +74,9 @@ export class HUD {
         this.text(ctx, boss.name, w / 2, 99, 11, COLORS.orange, 'center', 600);
         this.line(ctx, bx, 117, bx + bw, 117, '#5a2b2c', 4);
         this.line(ctx, bx, 117, bx + bw * Math.max(0, boss.hp / boss.maxHp), 117, COLORS.orange, 4);
+        boss.ports.forEach((hp,i)=>this.diamond(ctx,w/2+(i-1)*17,130,4,hp>0?COLORS.jade:'#42516c',hp>0));
+        if(boss.armorHit>0)this.text(ctx,'FLANK TO A CYAN LOCK',w/2,148,9,COLORS.jade,'center',600);
+        else if(boss.coreIntro>0)this.text(ctx,'CORE EXPOSED',w/2,148,10,'#efffff','center',600);
       }
       this.drawWeapons(ctx, w, h, mobile);
       if (this.input.touch) this.drawTouch(ctx, w, h);
@@ -77,7 +84,7 @@ export class HUD {
       if (sim.time < 12 && sim.mode === 'playing' && !this.input.touch) {
         const padConnected = navigator.getGamepads?.()[0];
         ctx.globalAlpha = clamp((12 - sim.time) / 2, 0, 0.7);
-        this.text(ctx, sim.time<6?'TAP TO MOVE   ·   AUTO FIRE':padConnected ? 'L MOVE   R AIM   A BOOST   B FLOOR PULSE' : 'CLICK / WASD MOVE   ·   SPACE BOOST   ·   E FLOOR PULSE', w / 2, h - 23, mobile ? 8 : 10, COLORS.white, 'center');
+        this.text(ctx, sim.time<6?'TAP TO MOVE   ·   AUTO FIRE':padConnected ? 'L MOVE   R AIM   A BOOST   B FLOOR PULSE' : 'WASD MOVE  ·  HOLD CLICK AIM  ·  SPACE BOOST  ·  E PULSE', w / 2, h - 23, mobile ? 8 : 10, COLORS.white, 'center');
         ctx.globalAlpha = 1;
       }
       if (sim.mode === 'dead' || sim.mode === 'victory') this.drawResult(ctx, w, h, sim.mode === 'victory');
@@ -97,7 +104,7 @@ export class HUD {
   drawAttract(ctx, w, h, mobile) {
     this.text(ctx, 'GEOMETRY GLITCH', 28, 37, mobile ? 28 : 36, COLORS.white, 'left', 900, DISPLAY);
     ctx.globalAlpha = 0.7 + Math.sin(this.sim.worldTime * 3) * 0.3;
-    this.text(ctx, this.input.touch ? 'TOUCH TO LAUNCH' : navigator.getGamepads?.()[0] ? 'A  /  LAUNCH' : 'ENTER  /  LAUNCH', w / 2, h - 59, 14, COLORS.jade, 'center', 600);
+    this.text(ctx, this.input.touch ? 'TOUCH TO LAUNCH' : Array.from(navigator.getGamepads?.()||[]).some(p=>p&&p.connected!==false) ? 'A  /  LAUNCH' : 'ENTER  /  LAUNCH', w / 2, h - 59, 14, COLORS.jade, 'center', 600);
     ctx.globalAlpha = 1;
     this.area('start', 0, 80, w, h - 80);
     DRONES.forEach((d,i)=>{
@@ -120,29 +127,11 @@ export class HUD {
     if(!inside)this.text(ctx,'›',x,y-19,18,color,'center',600);
     this.area(exit?'navigateSafe':`navigateWeapon${target.id}`,x-26,y-24,52,75);
   }
-  drawWeaponBeacons(ctx) {
-    const w=this.width,h=this.height,t=this.sim.worldTime,focus=this.renderer.navigationEntity;
-    const entries=this.sim.weaponDrops.map(drop=>{
-      const pos=this.renderer.screenPoint(drop.x,.45,drop.z),inside=pos.visible&&pos.x>40&&pos.x<w-40&&pos.y>160&&pos.y<h-170;
-      const d=Math.max(1,Math.hypot(drop.x,drop.z)),near=this.renderer.screenPoint(drop.x/d*3,.85,drop.z/d*3),center=this.renderer.screenPoint(0,.85,0),angle=Math.atan2(near.x-center.x,center.y-near.y);
-      return {...drop,inside,anchor:pos,angle,selected:focus?.type==='weapon'&&focus.id===drop.id,x:inside?pos.x:w/2+Math.sin(angle)*(w/2-36),y:inside?pos.y-46:h/2-Math.cos(angle)*(h/2-170)};
-    });
-    const obstacles=this.hitAreas.map(a=>({x:a.x+a.w/2,y:a.y+a.h/2,size:Math.max(a.w,a.h)}));
-    for(const mark of layoutWeaponBeacons(entries,w,h,obstacles,this.renderer.screenPoint(0,.85,0))){
-      const {x,y,size,inside,selected,weapon}=mark,color=WEAPONS[weapon].color,r=size/2,cut=10;
-      ctx.save();
-      if(inside){ctx.globalAlpha=.65;this.line(ctx,x,y+r,mark.anchor.x,mark.anchor.y,color,1);this.diamond(ctx,mark.anchor.x,mark.anchor.y,4,color,false);}
-      ctx.globalAlpha=inside||selected?1:.82;
-      ctx.beginPath();ctx.moveTo(x-r+cut,y-r);ctx.lineTo(x+r,y-r);ctx.lineTo(x+r,y+r-cut);ctx.lineTo(x+r-cut,y+r);ctx.lineTo(x-r,y+r);ctx.lineTo(x-r,y-r+cut);ctx.closePath();
-      ctx.fillStyle='#071526ee';ctx.fill();ctx.strokeStyle=selected?'#efffff':color;ctx.lineWidth=selected?2.5:1.5;ctx.shadowColor=color;ctx.shadowBlur=selected?17:8;ctx.stroke();ctx.shadowBlur=0;
-      const wash=ctx.createLinearGradient(x,y-r,x,y+r);wash.addColorStop(0,color+'38');wash.addColorStop(1,color+'04');ctx.fillStyle=wash;ctx.fill();
-      this.weaponDiagram(ctx,weapon,x,y,inside?46:33,color,t);
-      // Pickup-only corner tabs and a plus distinguish equipment from enemy shapes.
-      this.line(ctx,x-r+cut,y-r,x-r+cut+14,y-r,'#f0ffff',2);
-      this.line(ctx,x+r-8,y+r-9,x+r-8,y+r-3,color,1.5);this.line(ctx,x+r-11,y+r-6,x+r-5,y+r-6,color,1.5);
-      if(selected){const phase=(t*.5)%1;ctx.strokeStyle='#eaffff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,y,r+6,-Math.PI/2,-Math.PI/2+TAU*(.3+phase*.35));ctx.stroke();}
-      if(!inside){ctx.translate(x,y);ctx.rotate(mark.angle);ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(0,-r-8);ctx.lineTo(-4,-r-3);ctx.lineTo(4,-r-3);ctx.closePath();ctx.fill();}
-      ctx.restore();this.area(`navigateWeapon${mark.id}`,x-r,y-r,size,size);
+  drawWeaponBeacons() {
+    // Generous invisible tap regions stay attached to the actual floor symbols.
+    for(const drop of this.sim.weaponDrops){
+      const pos=this.renderer.screenPoint(drop.x,.16,drop.z);
+      if(pos.visible&&pos.x>28&&pos.x<this.width-28&&pos.y>145&&pos.y<this.height-170)this.area(`navigateWeapon${drop.id}`,pos.x-28,pos.y-28,56,56);
     }
   }
   drawWorldMarks(ctx) {
@@ -168,14 +157,14 @@ export class HUD {
     for (const e of sim.enemies) {
       if (e.warmup > 0) {
         const pos = project(e.x, 0.1, e.z);
-        ctx.strokeStyle = e.color; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
-        ctx.beginPath(); ctx.ellipse(pos.x, pos.y, 11 + Math.sin(e.age * 12) * 2, 5, 0, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
+        if(pos.visible){ctx.strokeStyle = e.color; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+        ctx.beginPath(); ctx.ellipse(pos.x, pos.y, 11 + Math.sin(e.age * 12) * 2, 5, 0, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;}
       }
       if (e.windup > 0 && (e.type === 'prism' || e.type === 'guard' || e.state === 'windup')) {
         const pos = project(e.x, 0.7, e.z);
         const target = e.type === 'dart' ? project(e.x + e.aimX * 17, 0.1, e.z + e.aimZ * 17) : project(e.aimX, 0.1, e.aimZ);
-        ctx.save(); ctx.setLineDash([4, 7]); this.line(ctx, pos.x, pos.y, target.x, target.y, `${e.color}99`, 1); ctx.restore();
-        ctx.strokeStyle = e.color; ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, TAU); ctx.stroke();
+        if(pos.visible&&target.visible){ctx.save(); ctx.setLineDash([4, 7]); this.line(ctx, pos.x, pos.y, target.x, target.y, `${e.color}99`, 1); ctx.restore();
+        ctx.strokeStyle = e.color; ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, TAU); ctx.stroke();}
       }
       if((e.elite||e.type==='pillar')&&e.warmup<=0){const pos=project(e.x,2,e.z);if(pos.visible){this.line(ctx,pos.x-12,pos.y-11,pos.x+12,pos.y-11,'#172844',4);this.line(ctx,pos.x-12,pos.y-11,pos.x-12+24*Math.max(0,e.hp/e.maxHp),pos.y-11,e.color,2);}}
     }
@@ -188,7 +177,7 @@ export class HUD {
       const d=Math.max(1,Math.hypot(e.x,e.z)),near=project(e.x/d*3,.8,e.z/d*3),center=project(0,.8,0),angle=Math.atan2(near.x-center.x,center.y-near.y),x=this.width/2+Math.sin(angle)*(this.width/2-26),y=this.height/2-Math.cos(angle)*(this.height/2-135);
       ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.fillStyle='#ff638d';ctx.shadowColor='#ff638d';ctx.shadowBlur=8;ctx.beginPath();ctx.moveTo(0,-8);ctx.lineTo(-5,4);ctx.lineTo(5,4);ctx.closePath();ctx.fill();ctx.restore();
     }
-    if (sim.mode === 'playing' && !this.input.touch && this.input.mouse.active) {
+    if (sim.mode === 'playing' && !this.input.touch && this.input.mouse.active && (Math.hypot(sim.player.vx,sim.player.vz)<.5||this.input.mouse.down)) {
       const x = this.input.mouse.x * this.width, y = this.input.mouse.y * this.height;
       ctx.globalAlpha = 0.75;
       ctx.strokeStyle = WEAPONS[sim.player.weapon].color; ctx.lineWidth = 1;
@@ -203,6 +192,11 @@ export class HUD {
       if(sim.player.hp>0){
         const points=this.renderer.shipScreenPoints();
         ctx.save();ctx.beginPath();points.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));ctx.closePath();ctx.fillStyle='#102d46cc';ctx.fill();ctx.strokeStyle='#071a30';ctx.lineWidth=4;ctx.stroke();ctx.strokeStyle='#efffff';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+      }
+      const hurtAge=sim.time-sim.lastHurt;
+      if(hurtAge>=0&&hurtAge<.65){
+        const source=project(Math.sin(sim.hurtAngle)*3,.5,Math.cos(sim.hurtAngle)*3),angle=Math.atan2(source.y-pos.y,source.x-pos.x);
+        ctx.save();ctx.globalAlpha=(1-hurtAge/.65)*.95;ctx.strokeStyle='#ff638d';ctx.lineWidth=4;ctx.beginPath();ctx.arc(pos.x,pos.y,36+hurtAge*8,angle-.65,angle+.65);ctx.stroke();ctx.restore();
       }
       if(sim.player.charge>0||sim.player.overdrive>0){ctx.save();ctx.strokeStyle=sim.player.overdrive>0?'#efffff':'#70ffcb';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(pos.x,pos.y,28,-Math.PI/2,-Math.PI/2+TAU*(sim.player.overdrive>0?sim.player.overdrive/CONFIG.overdriveDuration:sim.player.charge/CONFIG.overdriveCharge));ctx.stroke();ctx.restore();}
       if (sim.player.invuln > 0 && sim.time > 3) {
@@ -242,9 +236,10 @@ export class HUD {
       if(!mobile)this.text(ctx,String(i+1),xx+32,yy+3,8,owned?WEAPONS[i].color:'#50617d');
       if(active)this.line(ctx,xx+5,yy+17,xx+27,yy+17,current.color,2);
       if(i===7&&owned){this.text(ctx,String(p.ammo[7]),xx+29,yy-14,8,WEAPONS[7].color);if(p.sisterCD>0)this.line(ctx,xx+5,yy+17,xx+5+22*(1-p.sisterCD/WEAPONS[7].cooldown),yy+17,WEAPONS[7].color,2);}
+      if(owned&&this.sim.weaponNotice?.weapon===i&&this.sim.weaponNotice.life>0){ctx.save();ctx.globalAlpha=.35+.35*Math.sin(this.sim.weaponNotice.life*12);ctx.strokeStyle=WEAPONS[i].color;ctx.lineWidth=2;ctx.strokeRect(xx-3,yy-20,38,40);ctx.restore();}
       if(owned)this.area(`weapon${i}`,xx-5,yy-21,mobile?44:56,42);
     }
-    if(this.sim.weaponNotice?.life>0){const n=this.sim.weaponNotice,c=WEAPONS[n.weapon].color,fade=Math.min(1,n.life*2),arrival=Math.max(0,n.life-1.8)/.6;ctx.save();ctx.globalAlpha=fade;ctx.fillStyle='#071526cc';ctx.fillRect(w/2-43,h*.67-39,86,78);this.line(ctx,w/2-43,h*.67-39,w/2+43,h*.67-39,c,2);this.weaponDiagram(ctx,n.weapon,w/2,h*.67,56+arrival*20,c);ctx.restore();}
+
   }
   weaponDiagram(ctx,weapon,x,y,size,color,time=null){
     ctx.save();ctx.translate(x,y);ctx.scale(size/36,size/36);ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.lineCap='round';ctx.lineJoin='round';ctx.shadowColor=color;ctx.shadowBlur=6;
@@ -283,8 +278,8 @@ export class HUD {
     for (const [stick, x, y] of [[this.input.left, w * 0.17, h * 0.77], [this.input.right, w * 0.72, h * 0.77]]) {
       const ox = stick?.ox ?? x, oy = stick?.oy ?? y;
       ctx.globalAlpha = stick ? 0.65 : 0.16;
-      ctx.strokeStyle = COLORS.jade; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ox, oy, 45, 0, TAU); ctx.stroke();
-      const dx = (stick?.x ?? x) - ox, dy = (stick?.y ?? y) - oy, d = Math.max(1, Math.hypot(dx, dy) / 35);
+      ctx.strokeStyle = COLORS.jade; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ox, oy, 52, 0, TAU); ctx.stroke();
+      const dx = (stick?.x ?? x) - ox, dy = (stick?.y ?? y) - oy, d = Math.max(1, Math.hypot(dx, dy) / 39);
       ctx.fillStyle = '#77ffe035'; ctx.beginPath(); ctx.arc(ox + dx / d, oy + dy / d, 17, 0, TAU); ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -292,7 +287,7 @@ export class HUD {
     this.ability(ctx, w - 52, h - 65, 32, 1 - clamp(p.burstCD / CONFIG.burstCooldown, 0, 1), COLORS.jade, '◎', 'PULSE', '', 'burst');
     this.area('touchPause', w / 2 - 30, 0, 60, 65);
   }
-  scrim(ctx, w, h, opacity = 0.8) { ctx.fillStyle = `rgba(3,8,14,${opacity})`; ctx.fillRect(0, 0, w, h); }
+  scrim(ctx, w, h, opacity = 0.8) { this.hitAreas=[];ctx.fillStyle = `rgba(3,8,14,${opacity})`; ctx.fillRect(0, 0, w, h); }
   drawPause(ctx, w, h) {
     this.scrim(ctx, w, h, 0.78);
     this.text(ctx, 'PAUSED', w / 2, h * 0.35, Math.min(76, w * 0.16), COLORS.white, 'center', 900, DISPLAY);
@@ -331,7 +326,7 @@ export class HUD {
   drawSettings(ctx, w, h) {
     this.scrim(ctx, w, h, 0.94);
     this.text(ctx, 'SYSTEM', w / 2, h * 0.19, 52, COLORS.white, 'center', 900, DISPLAY);
-    const values = [this.audio.muted ? 'OFF' : 'ON', this.audio.music ? 'ON' : 'OFF', this.sim.reduced ? 'ON' : 'OFF', this.assistedTouch ? 'ASSISTED' : 'TWIN STICK', document.fullscreenElement ? 'EXIT' : 'ENTER', DRONES[this.sim.supportChoice].name];
+    const values = [this.audio.muted ? 'OFF' : 'ON', this.audio.music ? 'ON' : 'OFF', this.sim.reduced ? 'ON' : 'OFF', document.fullscreenElement ? 'EXIT' : 'ENTER', DRONES[this.sim.supportChoice].name];
     settings.forEach((s, i) => {
       const x = w / 2 - Math.min(150, w * 0.33), y = h * 0.34 + i * 46;
       this.text(ctx, s, x, y, 11, i === this.menuRow ? COLORS.white : COLORS.dim, 'left', 600);

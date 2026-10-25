@@ -1,27 +1,25 @@
 import { TAU } from './math.js';
 
-// Formations live in the same local surface chart as combat and navigation.
+const fract=x=>x-Math.floor(x);
+// A low-discrepancy field: waves still arrive together, but never as tight blocks.
 export function wavePosition(pattern,index,count,angle,chapter=0,swarm=false){
-  const side=pattern==='pincer'?index%2:pattern==='ritual'?index%3:0;
-  const sector=angle+(pattern==='pincer'?side*Math.PI:pattern==='ritual'?side*TAU/3:0);
-  const n=pattern==='pincer'?Math.floor(index/2):pattern==='ritual'?Math.floor(index/3):index;
-  const spacing=swarm?.78:1.55,groups=pattern==='pincer'?2:pattern==='ritual'?3:1;
-  const columns=Math.ceil(Math.sqrt(count/groups)),across=(n%columns-(columns-1)/2)*spacing;
-  let lateral=across,radius=18+Math.min(5,chapter*.45)+Math.floor(n/columns)*spacing,a=sector;
-  if(pattern==='hunt'){
-    const row=Math.floor(n/3),wing=n%3-1;
-    lateral=wing*(1.4+row*.65);radius=18+row*1.25;
+  const groups=pattern==='pincer'?2:pattern==='ritual'?3:1,side=index%groups,n=Math.floor(index/groups);
+  const population=Math.ceil(count/groups),u=(n+.5)/population,v=fract(n*.61803398875+.31);
+  const spread=22+Math.min(4,chapter*.3),depth=10+(swarm?3:0);
+  let a=angle+side*TAU/groups,r=spread+v*depth;
+  if(pattern==='surge'){
+    // Keep a generous, readable 100-degree escape opening in the travel direction.
+    a+=Math.PI*50/180+u*Math.PI*260/180;
+  }else if(pattern==='pincer'||pattern==='ritual'){
+    a+=(u-.5)*(pattern==='pincer'?2.35:1.65);
   }else if(pattern==='flood'){
-    const width=Math.ceil(Math.sqrt(count)*1.65);
-    lateral=(n%width-(width-1)/2)*1.65;radius=21+Math.floor(n/width)*1.5;
+    // A loose advancing front, spread across the full visible width rather than a grid.
+    const lateral=(u-.5)*64,forward=21+v*9;
+    return{x:Math.cos(a)*forward-Math.sin(a)*lateral,z:Math.sin(a)*forward+Math.cos(a)*lateral,side,sector:Math.atan2(Math.sin(a)*forward+Math.cos(a)*lateral,Math.cos(a)*forward-Math.sin(a)*lateral)};
   }else if(pattern==='spiral'){
-    const f=index/Math.max(1,count-1);a=angle+f*Math.PI*1.55;radius=19+f*8;
-    return{x:Math.cos(a)*radius,z:Math.sin(a)*radius,side,sector:a};
-  }else if(pattern==='surge'){
-    // A 100-degree opening stays centered on the ship's current travel heading.
-    const gap=Math.PI*100/180,columns=Math.ceil(count/2),f=Math.floor(index/2)/Math.max(1,columns-1);
-    a=angle+gap*.5+f*(TAU-gap);radius=22+(index%2)*2.2;
-    return{x:Math.cos(a)*radius,z:Math.sin(a)*radius,side,sector:a};
-  }
-  return{x:Math.cos(a)*radius-Math.sin(a)*lateral,z:Math.sin(a)*radius+Math.cos(a)*lateral,side,sector:a};
+    a+=u*Math.PI*1.85;r=21+u*8+v*10;
+  }else if(pattern==='hunt'){
+    a+=(u-.5)*Math.PI*1.6;
+  }else a+=u*TAU;
+  return{x:Math.cos(a)*r,z:Math.sin(a)*r,side,sector:a};
 }

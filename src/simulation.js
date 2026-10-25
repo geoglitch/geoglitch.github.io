@@ -1,6 +1,7 @@
 import { CONFIG, COLORS, WEAPONS, UPGRADES, DRONES } from './config.js';
 import { LEVELS, BOSS_NAMES } from './levels.js';
 import { wavePosition } from './waves.js';
+import { bossPorts, strikeBoss } from './boss.js';
 import { TAU, clamp, damp, lerp, distance, rng, arenaRadiusAt, clampToArena, segmentCircle, SpatialGrid, ribbonPoint } from './math.js';
 
 const TYPES = {
@@ -29,29 +30,29 @@ export class Simulation {
     this.reset('attract');
   }
   reset(mode = 'playing') {
-    this.mode = mode; this.previousMode = mode;
+    this.mode = mode; this.previousMode = mode;this.god=false;
     this.enemies = []; this.bullets = []; this.particles = [];this.sisters=[];this.fragments=[];
     this.pickups = []; this.rings = []; this.bolts = []; this.events = [];
-    this.attacks=[];this.stains=[];this.hitstop=0;this.weaponDrops=[];this.weaponClock=8;this.weaponNotice=null;this.terrainPulse=0;
+    this.attacks=[];this.stains=[];this.weaponDrops=[];this.weaponClock=8;this.weaponNotice=null;this.terrainPulse=0;
     this.time = 0; this.musicBeat = 0; this.worldTime = 0; this.levelTime = 0; this.levelIndex = 0;
     this.level = LEVELS[0]; this.score = 0; this.kills = 0;
     this.exitZone=null;this.levelKills=0;this.reactorClock=10;this.dashHits=new Set();this.waveCount=0;this.lastWave=null;this.pillarEncounter=false;this.pillarsSpawned=false;
-    this.wavePacks=new Map();this.wavesCleared=0;this.waveWarning=null;this.sweepNotice=null;this.chainNotice=null;this.scorePulse=0;this.reactorChain=0;this.bestReactorChain=0;this.lastDetonation=-10;
+    this.wavePacks=new Map();this.wavesCleared=0;this.waveWarning=null;this.sweepNotice=null;this.chainNotice=null;this.scorePulse=0;this.reactorChain=0;this.bestReactorChain=0;this.lastDetonation=-10;this.salvageTime=0;
     this.combo = 1; this.comboTime = 0; this.souls = 0; this.credits = 0;
-    this.trauma = 0; this.flash = 0; this.spawnClock = 4.8;
+    this.trauma = 0; this.flash = 0; this.spawnClock = 4.8;this.waveHeld=false;this.targetWeaponId=null;this.lastHurt=-100;this.damageTaken=0;
     this.bossSpawned = false; this.bossDefeated = false;
     this.banner = 4; this.shiftWarning = false; this.upgradeChoices = [];
     this.upgrades = { petals: 0, orbit: 0, lightning: 0, haste: 0, heart: 0, magnet: 0 };
     this.arena = { from: 8, to: 8, mix: 1, rotation: 0, targetRotation: 0 };
     this.player = {
-      x: 0, z: -3, px: 0, pz: -3, vx: 0, vz: 0, angle: 0, aim: 0,
-      hp: 5, maxHp: 5, invuln: 3, dash: 0, dashCD: 0, burstCD: 0,
+      x: 0, z: 0, px: 0, pz: 0, vx: 0, vz: 0, angle: 0, aim: 0,
+      hp: 5, maxHp: 5, invuln: 3, dash: 0, dashCD: 0, burstCD: 0, dashBuffer:0, burstBuffer:0,
       shotCD: 0, weapon: 0, lastWeapon:0, sisterCD:0, warpCD:0, ownedWeapons: [0], ammo: {}, orbit: 0, tail: [], comboStep:0, comboWindow:0, attackTime:0, charge:0, overdrive:0,
     };
     this.selectSupport(this.supportChoice);
     this.createObstacles();
     this.createGates();
-    this.spawnWeapon(1,-14,9);this.spawnWeapon(3,14,14);this.spawnWeapon(2,8,-18);this.spawnWeapon(7,-17,-17);this.spawnWeapon(8,0,34);
+    this.spawnWeapon(1,-7,9);this.spawnWeapon(3,7,-7);this.spawnWeapon(2,18,15);this.spawnWeapon(7,-17,-17);this.spawnWeapon(8,0,34);
     for (let i = 0; i < (this.curvedWorld?0:8); i++) {
       const angle = this.rand() * TAU, r = 10 + this.rand() * 14;
       this.spawnEnemy('anchor', Math.cos(angle) * r, Math.sin(angle) * r * CONFIG.arenaScaleZ, 0.4);
@@ -83,7 +84,7 @@ export class Simulation {
     if(!this.player.ownedWeapons.includes(index))return false;
     if(WEAPONS[index].summon&&(this.player.sisterCD>0||this.sisters.length))return false;
     if(WEAPONS[index].ranged&&!(this.player.ammo[index]>0))return false;
-    this.player.weapon=index;if(!WEAPONS[index].summon)this.player.lastWeapon=index;this.player.shotCD=Math.min(this.player.shotCD,.12);return true;
+    this.player.weapon=index;if(!WEAPONS[index].summon)this.player.lastWeapon=index;return true;
   }
   cycleWeapon(direction) {
     const p=this.player,list=p.ownedWeapons.filter(i=>(!WEAPONS[i].ranged||p.ammo[i]>0)&&(!WEAPONS[i].summon||(p.sisterCD<=0&&!this.sisters.length)));
@@ -97,10 +98,11 @@ export class Simulation {
       // continue gathering currency without stealing or magnetizing equipment.
       if(distance(drop,p)<1.35){
         const w=WEAPONS[drop.weapon];
-        if(!p.ownedWeapons.includes(drop.weapon))p.ownedWeapons.push(drop.weapon);
+        const discovered=!p.ownedWeapons.includes(drop.weapon);
+        if(discovered)p.ownedWeapons.push(drop.weapon);
         if(w.ranged)p.ammo[drop.weapon]=w.ammo;
-        this.equipWeapon(drop.weapon);drop.collected=true;
-        this.weaponNotice={weapon:drop.weapon,life:2.4};
+        if(p.weapon===0||p.weapon===drop.weapon||this.targetWeaponId===drop.id)this.equipWeapon(drop.weapon);drop.collected=true;
+        this.weaponNotice={weapon:drop.weapon,life:2.4};p.invuln=Math.max(p.invuln,.45);
         this.ring(drop.x,drop.z,w.color,2.3,.3);this.spark(drop.x,drop.z,w.color,15,.6);
         this.emit('weaponPickup',{weapon:drop.weapon});
       }
@@ -150,6 +152,7 @@ export class Simulation {
   }
   emit(type, data = {}) { this.events.push({ type, ...data }); }
   setPause() {
+    this.player.dashBuffer=0;this.player.burstBuffer=0;
     if (this.mode === 'playing') { this.mode = 'paused'; this.emit('pause'); }
     else if (this.mode === 'paused') { this.mode = 'playing'; this.emit('resume'); }
   }
@@ -166,7 +169,7 @@ export class Simulation {
       hit: 0, cd: 1 + this.rand() * 2, phase: this.rand() * TAU,
       state: 'chase', windup: 0, aimX: 0, aimZ: 0,
       orbCD: 0, dead: false, size: .75+this.rand()*.5, stride: this.rand()*10, stagger: 0,
-      maneuverClock:.6+this.rand()*1.4,sidestep:0,swerve:0,surge:1,roamAngle:a,packId:null,packPhase:0,
+      maneuverClock:.6+this.rand()*1.4,sidestep:0,swerve:0,surge:1,roamAngle:a,packId:null,packPhase:0,flank:this.rand()>.5?1:-1,
     };
     e.hp *= 1 + this.level.chapter * 0.16;
     if((this.time>25||this.level.number>2)&&['cube','dart','prism','guard'].includes(type)&&this.rand()<.16){e.elite=true;e.size*=1.65;e.radius*=1.5;e.hp*=5;e.speed*=.76;}
@@ -179,6 +182,7 @@ export class Simulation {
       e.name = BOSS_NAMES[this.level.chapter%BOSS_NAMES.length];
     }
     e.maxHp = e.hp;
+    if(type==='boss'){e.ports=Array(3).fill(e.maxHp*.55/3);e.portAngle=e.phase;e.shielded=true;e.coreIntro=0;}
     this.enemies.push(e);
     return e;
   }
@@ -236,6 +240,7 @@ export class Simulation {
   melee() {
     const p=this.player,w=WEAPONS[p.weapon],power=p.overdrive>0?CONFIG.overdrivePower:1,rate=p.overdrive>0?CONFIG.overdriveRate:1;
     if(p.shotCD>0)return;
+    p.aim=this.weaponAim();
     if(w.summon){
       if(!(p.ammo[p.weapon]>0)){this.equipWeapon(0);return;}
       if(this.sisters.length||p.sisterCD>0){if(!this.equipWeapon(p.lastWeapon))this.equipWeapon(0);return;}
@@ -267,7 +272,7 @@ export class Simulation {
     this.attacks.push({x:p.x,z:p.z,angle:p.aim,reach,arc,color:w.color,life:p.weapon===1?.38:.3,maxLife:p.weapon===1?.38:.3,heavy:finisher,weapon:p.weapon});
     if(w.hybrid){
       const group=++this.id;
-      for(const side of [-1,0,1])this.shoot(p.x+Math.sin(p.aim)*.7,p.z+Math.cos(p.aim)*.7,p.aim+side*.085,{owner:'player',weapon:0,damage:1.1*power,speed:44,life:.24,pierce:0,radius:.32*power,color:w.color,strokeGroup:group,wavePhase:group,amplified:p.overdrive>0});
+      for(const side of [-1,0,1])this.shoot(p.x+Math.sin(p.aim)*.7,p.z+Math.cos(p.aim)*.7,p.aim+side*.085,{owner:'player',weapon:0,damage:1.25*power,speed:48,life:.34,pierce:0,radius:.32*power,color:w.color,strokeGroup:group,wavePhase:group,amplified:p.overdrive>0});
     }
     let hits=0;
     for(const e of this.enemies){
@@ -280,16 +285,16 @@ export class Simulation {
         this.spark(e.x,e.z,w.color,16,1.2);hits++;
       }
     }
-    if(hits){this.hitstop=finisher?.025:.012;this.trauma=Math.max(this.trauma,finisher?.4:.18);this.emit('meleeHit',{size:finisher?1.8:1,hits});}
+    if(hits){this.trauma=Math.max(this.trauma,finisher?.4:.18);this.emit('meleeHit',{size:finisher?1.8:1,hits});}
     this.emit('swing',{weapon:p.weapon,heavy:finisher});
   }
   damagePlayer(x, z) {
     const p = this.player;
     if (p.invuln > 0 || p.dash > 0 || this.god) return;
-    p.hp--; p.invuln = CONFIG.invulnerability;
+    p.hp--;this.lastHurt=this.time;this.hurtAngle=Math.atan2(x-p.x,z-p.z);this.damageTaken++; p.invuln = CONFIG.invulnerability;
     this.combo = Math.max(1, this.combo * 0.55);
     const d = Math.max(1, Math.hypot(p.x - x, p.z - z));
-    p.vx += (p.x - x) / d * 14; p.vz += (p.z - z) / d * 14;
+    p.vx += (p.x - x) / d * 4.5; p.vz += (p.z - z) / d * 4.5;
     this.trauma = 0.65; this.flash = 0.1;
     this.spark(p.x, p.z, COLORS.pink, 36, 1.5);
     this.emit('hurt');
@@ -301,9 +306,19 @@ export class Simulation {
       this.emit('death');
     }
   }
-  damageEnemy(e, damage, chain = false) {
+  damageEnemy(e, damage, chain = false, source = this.player) {
     if (e.dead || e.warmup > 0) return;
-    e.hp -= damage*(e.type==='boss'&&e.shielded?.22:1); e.hit = 0.13;e.stagger=.08;
+    if(e.type==='boss'){
+      const hit=strikeBoss(e,damage,source);damage=hit.damage;
+      if(hit.broken){
+        const port=bossPorts(e)[hit.index];this.shatter(port.x,port.z,COLORS.jade,12);this.ring(port.x,port.z,COLORS.jade,7,.6);this.emit('explosion',{size:1.5,x:port.x});
+        this.score+=450;for(const b of this.bullets)if(b.enemy&&distance(b,e)<=9)b.life=0;
+      }
+      e.shielded=e.ports.some(hp=>hp>0);
+      if(hit.broken&&!e.shielded){e.coreIntro=3;e.cd=Math.max(e.cd,2.1);this.ring(e.x,e.z,COLORS.jade,7,.8);this.spark(e.x,e.z,COLORS.jade,24,1);}
+      if(damage<=0){e.armorHit=.12;return;}
+    }
+    e.hp -= damage; e.hit = 0.13;e.stagger=.08;
     if (e.hp <= 0) this.killEnemy(e, chain);
   }
   killEnemy(e, chain = false) {
@@ -314,7 +329,7 @@ export class Simulation {
     const big = e.type === 'boss',tower=e.type==='pillar';
     if(big||tower||e.type==='anchor'||e.elite||e.type==='guard'||e.type==='splitter')this.shatter(e.x,e.z,e.color,big||tower?20:8);
     this.spark(e.x,e.z,e.color,big||tower?140:44,big||tower?3:1.7);
-    this.spark(e.x,e.z,COLORS.white,big?60:13,big?2.5:1.25);
+    this.spark(e.x,e.z,COLORS.white,big?40:7,big?2.5:1.25);
     this.ring(e.x,e.z,e.color,big||tower?15:e.radius*3+1.5,big||tower?1.1:.48);
     this.ring(e.x,e.z,COLORS.white,big?8:e.radius*1.8,.22);
     this.trauma = Math.max(this.trauma, big ? 1 : 0.11);
@@ -359,6 +374,9 @@ export class Simulation {
       this.wavePacks.delete(e.waveId);
       if(!pack.abandoned&&this.mode==='playing'){
         const bonus=Math.round((500+pack.count*40)*Math.min(8,this.combo));this.score+=bonus;this.wavesCleared++;this.scorePulse=1;
+        // Cash in the space you earned: sweep existing energy into the ship
+        // and leave two seconds before the next formation can be scheduled.
+        this.salvageTime=1.25;this.spawnClock=Math.max(this.spawnClock,2);
         this.sweepNotice={count:pack.count,bonus,life:1.6};this.ring(this.player.x,this.player.z,COLORS.jade,5,.45);this.emit('waveClear',{count:pack.count,bonus});
       }
     }
@@ -410,10 +428,10 @@ export class Simulation {
     this.trauma = Math.max(0, this.trauma - dt * 2);
     this.flash = Math.max(0, this.flash - dt);
     this.updateEffects(dt);
-    if(this.hitstop>0){this.hitstop=Math.max(0,this.hitstop-dt);return;}
     if (this.mode === 'paused' || this.mode === 'upgrade' || this.mode === 'victory' || this.mode === 'dead') return;
     if (this.mode === 'attract') input = this.demoInput();
     this.time += dt; this.musicBeat += dt * (134 + Math.min(8,this.level.chapter)) / 60; this.levelTime += dt; this.banner = Math.max(0, this.banner - dt);
+    this.salvageTime=Math.max(0,this.salvageTime-dt);
     this.scorePulse=Math.max(0,this.scorePulse-dt*3);
     for(const notice of [this.waveWarning,this.sweepNotice,this.chainNotice])if(notice)notice.life=Math.max(0,notice.life-dt);
     for(const o of this.obstacles)o.warmup=Math.max(0,o.warmup-dt);
@@ -452,6 +470,14 @@ export class Simulation {
     }
     return target;
   }
+  weaponAim(){
+    const p=this.player,w=WEAPONS[p.weapon];
+    if(!w.autoTarget)return p.angle;
+    const reach=(w.reach+this.upgrades.petals*.25)*(p.overdrive>0?CONFIG.overdrivePower:1);
+    let target=null,nearest=Infinity;
+    for(const e of this.enemies){if(e.dead||e.warmup>0)continue;const d=distance(e,p);if(d<reach+e.radius&&d<nearest){target=e;nearest=d;}}
+    return target?Math.atan2(target.x-p.x,target.z-p.z):p.angle;
+  }
   recenter() {
     const p = this.player, dx = p.x, dz = p.z;
     p.x = 0; p.z = 0; p.px -= dx; p.pz -= dz;
@@ -470,19 +496,20 @@ export class Simulation {
   updatePlayer(dt, input) {
     const p = this.player;
     p.px = p.x; p.pz = p.z;
-    for (const key of ['invuln', 'dash', 'dashCD', 'burstCD', 'shotCD','comboWindow','attackTime','overdrive','sisterCD','warpCD']) p[key] = Math.max(0, p[key] - dt);
+    for (const key of ['invuln', 'dash', 'dashCD', 'burstCD', 'shotCD','comboWindow','attackTime','overdrive','sisterCD','warpCD','dashBuffer','burstBuffer']) p[key] = Math.max(0, p[key] - dt);
+    if(input.dash)p.dashBuffer=.14;if(input.burst)p.burstBuffer=.14;
     if (Number.isInteger(input.weapon)) this.equipWeapon(clamp(input.weapon, 0, WEAPONS.length-1));
     let mx = input.moveX ?? 0, mz = input.moveZ ?? 0;
     const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
-    if (Number.isFinite(input.aimX) && Number.isFinite(input.aimZ)) p.aim = Math.atan2(input.aimX - p.x, input.aimZ - p.z);
-    else if (input.aimAngle !== undefined) p.aim = input.aimAngle;
-    else if(!input.manualAim) { const target = this.nearestTarget(p.x, p.z); if (target) p.aim = Math.atan2(target.x - p.x, target.z - p.z); }
-    const heading=ml>.08?Math.atan2(mx,mz):input.aimAngle!==undefined?input.aimAngle:p.angle;
+    const turnAim=Number.isFinite(input.aimAngle)?input.aimAngle:Number.isFinite(input.aimX)&&Number.isFinite(input.aimZ)?Math.atan2(input.aimX-p.x,input.aimZ-p.z):p.angle;
+    const heading=input.manualAim?turnAim:ml>.08?Math.atan2(mx,mz):turnAim;
     const turn=Math.atan2(Math.sin(heading-p.angle),Math.cos(heading-p.angle))*(1-Math.exp(-12*dt));
     p.angle+=clamp(turn,-9*dt,9*dt);
-    if (input.dash && p.dashCD <= 0) {
+    p.aim=this.weaponAim();
+    if (p.dashBuffer>0 && p.dashCD <= 0) {
+      p.dashBuffer=0;
       this.dashHits.clear();
-      const a = ml > 0.1 ? Math.atan2(mx, mz) : p.aim;
+      const a = ml > 0.1 ? Math.atan2(mx, mz) : p.angle;
       p.dash = CONFIG.dashDuration; p.dashCD = CONFIG.dashCooldown - Math.min(5,this.upgrades.haste) * 0.07;
       p.vx = Math.sin(a) * CONFIG.dashSpeed; p.vz = Math.cos(a) * CONFIG.dashSpeed;
       p.invuln = Math.max(p.invuln, CONFIG.dashDuration + 0.06);
@@ -504,7 +531,7 @@ export class Simulation {
     const bounded = this.curvedWorld ? (this.movementResolver?.(p.x,p.z)??{x:p.x,z:p.z}) : clampToArena(p.x, p.z, this.arena, CONFIG.arenaRadius, CONFIG.arenaScaleZ, 0.9);
     if (bounded.x !== p.x || bounded.z !== p.z) {
       this.spark(bounded.x, bounded.z, COLORS.jade, p.dash > 0 ? 6 : 1, 0.5);
-      p.vx *= -0.35; p.vz *= -0.35;
+      p.vx = (bounded.x-p.px)/dt; p.vz = (bounded.z-p.pz)/dt;
     }
     p.x = bounded.x; p.z = bounded.z;
     for(const o of this.obstacles)if(!o.broken&&o.warmup<=0){
@@ -513,7 +540,7 @@ export class Simulation {
         if(p.dash>0&&Number.isFinite(o.hp)){this.damageObstacle(o,100);continue;}
         p.x+=hit.nx*hit.depth;p.z+=hit.nz*hit.depth;
         const into=p.vx*hit.nx+p.vz*hit.nz;
-        if(into<0){p.vx-=hit.nx*into*1.2;p.vz-=hit.nz*into*1.2;}
+        if(into<0){p.vx-=hit.nx*into;p.vz-=hit.nz*into;}
         if(Math.hypot(p.vx,p.vz)>3)this.spark(hit.x,hit.z,COLORS.jade,2,.3);
       }
     }
@@ -530,7 +557,7 @@ export class Simulation {
     }}
     p.tail.unshift({ x: p.x, z: p.z, angle: p.angle }); if (p.tail.length > 36) p.tail.pop();
     if(p.shotCD<=0)this.melee();
-    if (input.burst) this.burst();
+    if (p.burstBuffer>0&&p.burstCD<=0){p.burstBuffer=0;this.burst();}
   }
   spawnWave(){
     const p=this.player,l=this.level,pressure=this.pressure(),demo=this.mode==='attract';
@@ -540,14 +567,14 @@ export class Simulation {
     const pool=this.time<18?['diamond','cube','spinner']:l.enemies;
     const surge=!demo&&!l.boss&&this.time>28&&this.waveCount%5===0,swarm=!surge&&this.time>18&&this.waveCount%3===0;
     const pattern=surge?'surge':swarm?'swarm':this.waveCount%4===0?'pincer':l.pattern;
-    const count=Math.min(room,surge?Math.ceil(pressure.group*1.5):swarm?Math.max(12,pressure.group*2):demo?8:pressure.group),angle=surge?Math.PI/2-p.angle:this.rand()*TAU,packPhase=this.rand()*TAU;
+    const count=Math.min(room,surge?Math.ceil(pressure.group*1.5):swarm?Math.max(12,pressure.group*2):demo?8:pressure.group),angle=surge?Math.PI/2-p.angle:this.rand()*TAU;
     const hunter=this.time>25&&pool.includes('dart')?'dart':pool.includes('diamond')?'diamond':pool[0];
     const primary=swarm?'mote':pattern==='hunt'?hunter:pool[Math.floor(this.rand()*pool.length)],secondary=pool[Math.floor(this.rand()*pool.length)];
     const warmup=(surge?4:3)*60/(134+Math.min(8,l.chapter));let spawned=0;
     for(let i=0;i<count;i++){
-      const point=wavePosition(pattern,i,count,angle,l.chapter,swarm),type=surge&&i%3===0?'diamond':point.side===1&&!swarm?secondary:primary;
+      const point=wavePosition(pattern,i,count,angle,l.chapter,swarm),type=surge&&i%3===0?'diamond':!swarm&&this.time>18&&i%4===1?secondary:point.side===1&&!swarm?secondary:primary;
       const e=this.spawnEnemy(type,p.x+point.x,p.z+point.z,warmup);
-      if(e){spawned++;e.waveId=this.waveCount;e.packId=this.waveCount*3+point.side;e.packPhase=packPhase;e.roamAngle=point.sector+Math.PI/2;}
+      if(e){spawned++;e.waveId=this.waveCount;e.packId=this.waveCount*3+point.side;e.packPhase=e.phase;e.flank=i%2===0?1:-1;e.roamAngle=point.sector+Math.PI/2;}
     }
     this.wavePacks.set(this.waveCount,{count:spawned,remaining:spawned,abandoned:false});if(this.wavePacks.size>12)this.wavePacks.delete(this.wavePacks.keys().next().value);
     this.lastWave={count:spawned,pattern,type:primary,time:this.time};this.waveWarning={count:spawned,pattern,color:surge?COLORS.pink:TYPES[primary].color,life:warmup,maxLife:warmup};
@@ -573,7 +600,12 @@ export class Simulation {
     this.spawnClock -= dt;
     // Land the telegraph on a beat. This clock also drives audio and keeps running muted.
     const beatPhase=this.musicBeat%1;
-    if(this.spawnClock<=0&&(beatPhase<.07||this.spawnClock<-.46)&&this.spawnWave()>0)this.spawnClock=interval*(.92+this.rand()*.16);
+    if(this.spawnClock<=0&&(beatPhase<.07||this.spawnClock<-.46)){
+      const nearby=this.enemies.filter(e=>!e.dead&&e.warmup<=0&&e.type!=='anchor'&&distance(e,this.player)<8).length;
+      const crowded=!demo&&!l.boss&&this.time>8&&(this.time-this.lastHurt<2.3||nearby>=10);
+      if(crowded&&!this.waveHeld){this.spawnClock=2.2;this.waveHeld=true;}
+      else if(this.spawnWave()>0){this.spawnClock=interval*(.92+this.rand()*.16);this.waveHeld=false;}
+    }
     this.reactorClock-=dt;
     if(this.curvedWorld&&this.reactorClock<=0){
       this.reactorClock=14+this.rand()*6;
@@ -606,8 +638,8 @@ export class Simulation {
   }
   pressure(){
     const ramp=clamp((this.time-5)/65,0,1),l=this.level;
-    const cap=Math.min(CONFIG.maxEnemies-12,36+Math.floor(ramp*130)+l.number*2),interval=Math.max(3.2,lerp(6.5,4.8,ramp)/Math.sqrt(l.intensity));
-    return {cap:l.boss?Math.min(cap,32+l.chapter*4):cap,interval:l.boss?Math.max(4.8,interval):interval,group:l.boss?8+Math.floor(l.chapter*.5):Math.min(60,20+Math.floor(ramp*20)+l.chapter*2+(l.pattern==='flood'?8:l.pattern==='pincer'?4:0)),speed:lerp(.62,1,clamp(this.time/65,0,1))};
+    const cap=Math.min(CONFIG.maxEnemies-12,36+Math.floor(ramp*155)+l.number*2),interval=Math.max(3.2,lerp(6.5,4.8,ramp)/Math.sqrt(l.intensity));
+    return {cap:l.boss?Math.min(cap,32+l.chapter*4):cap,interval:l.boss?Math.max(4.8,interval):interval,group:l.boss?8+Math.floor(l.chapter*.5):Math.min(60,20+Math.floor(ramp*26)+l.chapter*2+(l.pattern==='flood'?8:l.pattern==='pincer'?4:0)),speed:lerp(.62,1,clamp(this.time/65,0,1))};
   }
   updateEnemies(dt) {
     const p = this.player,pace=this.pressure().speed;
@@ -618,7 +650,7 @@ export class Simulation {
         this.ring(e.x,e.z,COLORS.pink,5,1.6);this.emit('warning');
       }
       const previousX=e.x,previousZ=e.z;
-      e.age += dt; e.hit = Math.max(0, e.hit - dt); e.orbCD -= dt;e.stagger=Math.max(0,e.stagger-dt);
+      e.age += dt; e.hit = Math.max(0, e.hit - dt);e.armorHit=Math.max(0,(e.armorHit||0)-dt); e.orbCD -= dt;e.stagger=Math.max(0,e.stagger-dt);
       if (e.warmup > 0) { e.warmup -= dt; continue; }
       if(e.type==='pillar'){
         if(!e.landed){e.landed=true;this.ring(e.x,e.z,e.color,7,.8);this.spark(e.x,e.z,e.color,60,1.4);this.emit('explosion',{size:2});if(distance(e,p)<4)this.damagePlayer(e.x,e.z);}
@@ -648,23 +680,29 @@ export class Simulation {
         }
       } else {
         if(e.type==='diamond'){
-          const weave=Math.sin(e.age*2.3+e.phase)*.2+e.swerve*.6;
-          tx=nx-nz*weave;tz=nz+nx*weave;
-          if(d>7){tx+=(p.vx*.35)/Math.max(d,1);tz+=(p.vz*.35)/Math.max(d,1);}
+          // Lead the escape route, then commit to a direct bite at close range.
+          const lead=d>5?Math.min(.72,d/Math.max(1,speed)*.25):0;
+          const lx=dx+p.vx*lead,lz=dz+p.vz*lead,length=Math.max(.1,Math.hypot(lx,lz));
+          const flank=e.flank*Math.min(.55,Math.max(0,(d-4)/18));
+          tx=lx/length-nz*flank;tz=lz/length+nx*flank;
         }
         if (e.type === 'spinner') {
-          const orbit = (Math.sin(e.phase)>0?1:-1)*(1+Math.sin(e.age*2+e.phase)*.15),toward=d>10?1:d<6?-.9:0;
-          tx = nx*toward - nz * orbit; tz = nz*toward + nx * orbit;
+          // Circle outside the muzzle, then cut inward for a short attack window.
+          const attack=Math.sin(e.age*1.7+e.phase)>.96;
+          const orbit=e.flank*(attack?.35:1.05),toward=attack?1.35:d>11?.85:d<6?-.85:0;
+          tx=nx*toward-nz*orbit;tz=nz*toward+nx*orbit;
         }
         if(e.type==='cube'){
-          const retreat=d<5?1:d>24?-1:0;
-          tx=retreat?-nx*retreat:Math.sin(e.roamAngle);tz=retreat?-nz*retreat:Math.cos(e.roamAngle);
+          // Bait the ship into following, then turn across its route rather than trail it.
+          const retreat=d<5?1:d>24?-1:0,ambush=d>=5&&d<17&&Math.sin(e.age*1.3+e.phase)>.3;
+          tx=retreat?-nx*retreat:ambush?nx*.85-nz*e.flank*.65:Math.sin(e.roamAngle);
+          tz=retreat?-nz*retreat:ambush?nz*.85+nx*e.flank*.65:Math.cos(e.roamAngle);
         }
         if(e.type==='mote'){
-          const weave=Math.sin(e.age*5+e.packPhase)*.5+Math.sin(e.age*9+e.phase)*.15;
-          tx=nx-nz*weave;tz=nz+nx*weave;
-          let cx=0,cz=0,n=0;for(const other of this.grid.query(e.x,e.z,4))if(other!==e&&other.type==='mote'&&other.packId===e.packId){cx+=other.x-e.x;cz+=other.z-e.z;n++;}
-          if(n){tx+=cx/n*.08;tz+=cz/n*.08;}
+          // Independent curved approaches. No cohesion force pulling a swarm into one ball.
+          const lead=Math.min(.35,d*.014),lx=dx+p.vx*lead,lz=dz+p.vz*lead,len=Math.max(.1,Math.hypot(lx,lz));
+          const flank=e.flank*(d>5?.65:.12)+Math.sin(e.age*3.7+e.phase)*.18;
+          tx=lx/len-nz*flank;tz=lz/len+nx*flank;
         }
         if (e.type === 'splitter') {
           const surge = .8+Math.max(0,Math.sin(e.age*2.5+e.phase))*.5;
@@ -672,7 +710,7 @@ export class Simulation {
         }
         if (e.type === 'prism' || e.type === 'guard') {
           const toward = e.type==='prism'?(d>20?.7:d<14?-1.3:0):(d>15?.7:d<9?-.35:0);
-          tx = nx * toward - nz * (e.type==='prism'?.7:.15); tz = nz * toward + nx * (e.type==='prism'?.7:.15);
+          tx = nx * toward - nz * e.flank*(e.type==='prism'?.7:.25); tz = nz * toward + nx * e.flank*(e.type==='prism'?.7:.25);
           if (e.cd < 0 && e.windup <= 0) { e.windup = 0.7; e.aimX = p.x + p.vx * 0.15; e.aimZ = p.z + p.vz * 0.15; e.cd = e.type === 'guard' ? 2.5 : 1.9; }
           if (e.windup > 0) {
             e.windup -= dt;
@@ -685,7 +723,8 @@ export class Simulation {
           }
         }
         if (e.type === 'dart') {
-          if (e.cd < 0 && e.state === 'chase') { e.state = 'windup'; e.windup = 0.8; e.aimX = nx; e.aimZ = nz;this.emit('charge'); }
+          if(e.state==='chase'){tx=nx*.9-nz*e.flank*.55;tz=nz*.9+nx*e.flank*.55;}
+          if (e.cd < 0 && e.state === 'chase') { e.state = 'windup'; e.windup = 0.8;const lead=Math.min(.5,d/Math.max(1,speed*8));const ax=dx+p.vx*lead,az=dz+p.vz*lead,len=Math.max(.1,Math.hypot(ax,az));e.aimX=ax/len;e.aimZ=az/len;this.emit('charge',{x:e.x}); }
           if (e.state === 'windup') {
             tx = 0; tz = 0; e.windup -= dt;
             if (e.windup <= 0) { e.state = 'charge'; e.windup = 0.6; }
@@ -695,21 +734,34 @@ export class Simulation {
           } else if (e.state === 'recover') { tx = 0; tz = 0; if (e.cd < 0) { e.state = 'chase'; e.cd = 2.5; } }
         }
         if (e.type === 'boss') {
-          e.shielded=e.age%6<(this.level.chapter===0?3:3.6);
+          e.shielded=e.ports.some(hp=>hp>0);e.coreIntro=Math.max(0,e.coreIntro-dt);e.portAngle+=dt*(e.shielded?.16:.3);
           tx = nx * (d > 10 ? 1 : -0.3) - nz * 0.65;
           tz = nz * (d > 10 ? 1 : -0.3) + nx * 0.65;
           if (e.cd < 0) {
-            const first=this.level.chapter===0;e.cd = e.hp < e.maxHp * 0.5 ? (first?1.7:1.15) : (first?2.4:1.9);
-            const n = (e.hp<e.maxHp*.5?(first?16:22):(first?10:14)) + this.level.chapter;
-            for (let i = 0; i < n; i++) this.shoot(e.x, e.z, i * TAU / n + e.age * 0.6, { enemy: true, speed: 7.5 + this.level.chapter * 0.4, life: 3.4, radius: 0.25, color: COLORS.orange });
+            const first=this.level.chapter===0,enraged=e.hp<e.maxHp*.5&&e.coreIntro<=0;e.cd = enraged ? (first?1.7:1.15) : (first?2.4:1.9);
+            const n = (enraged?(first?16:22):(first?10:14)) + this.level.chapter;
+            for(let i=0;i<n;i++){
+              const a=i*TAU/n+e.age*.6,safe=bossPorts(e).find(port=>port.hp>0);
+              // The highlighted armor lane remains a navigable approach through each volley.
+              if(safe&&Math.abs(Math.atan2(Math.sin(a-safe.angle),Math.cos(a-safe.angle)))<.42)continue;
+              this.shoot(e.x,e.z,a,{enemy:true,speed:7.5+this.level.chapter*.4,life:3.4,radius:.25,color:COLORS.orange});
+            }
             this.ring(e.x, e.z, COLORS.orange, 5, 0.55); this.emit('bossAttack');
             if (this.enemies.length < 35) for (let i = 0; i < 3; i++) this.spawnEnemy('diamond', e.x + (this.rand() - 0.5) * 8, e.z + (this.rand() - 0.5) * 8, 0.9);
           }
         }
-        if (e.type !== 'boss') for (const other of this.grid.query(e.x, e.z, 2.5)) {
-          if (other === e || other.dead) continue;
-          const sx = e.x - other.x, sz = e.z - other.z, sd = Math.hypot(sx, sz), min = e.radius + other.radius + 0.3;
-          if (sd > 0 && sd < min) { tx += sx / sd * (min - sd) * 1.8; tz += sz / sd * (min - sd) * 1.8; }
+        if (e.type !== 'boss'&&e.state!=='charge') {
+          let avoidX=0,avoidZ=0;
+          for (const other of this.grid.query(e.x,e.z,4.5)) {
+            if(other===e||other.dead||other.warmup>0)continue;
+            const sx=e.x-other.x,sz=e.z-other.z,sd=Math.hypot(sx,sz),space=e.radius+other.radius+(e.type==='mote'?1.3:2);
+            if(sd<space){const a=sd>.001?sx/sd:Math.sin(e.phase),b=sd>.001?sz/sd:Math.cos(e.phase),force=(1-sd/space)*2.8;avoidX+=a*force;avoidZ+=b*force;}
+          }
+          // Bound avoidance so a crowd cannot impart a sudden speed spike.
+          const amount=Math.hypot(avoidX,avoidZ),scale=amount>1.6?1.6/amount:1;
+          tx+=avoidX*scale;tz+=avoidZ*scale;
+          const steering=Math.hypot(tx,tz),limit=e.type==='splitter'?1.7:1.45;
+          if(steering>limit){tx*=limit/steering;tz*=limit/steering;}
         }
         const grip=e.stagger>0?1.1:5.5;
         e.vx = damp(e.vx, tx * speed, grip, dt); e.vz = damp(e.vz, tz * speed, grip, dt);
@@ -720,7 +772,19 @@ export class Simulation {
         const d0 = Math.max(4, Math.hypot(e.x, e.z));
         e.vx -= e.x / d0 * dt * 2; e.vz -= e.z / d0 * dt * 2;
       }
-      e.x += e.vx * dt; e.z += e.vz * dt;
+      if(this.curvedWorld&&e.type!=='boss'&&this.enemyMotionResolver){
+        let motion=this.enemyMotionResolver(e,e.vx*dt,e.vz*dt);const blocked=motion.blocked;
+        if(blocked&&e.state!=='charge'&&Math.hypot(motion.x,motion.z)<Math.hypot(e.vx,e.vz)*dt*.25){
+          const speed=Math.max(1,Math.hypot(e.vx,e.vz)),d=Math.max(.1,distance(e,p)),nx=(p.x-e.x)/d,nz=(p.z-e.z)/d,side=e.flank||1;
+          const detour=this.enemyMotionResolver(e,-nz*speed*dt*side,nx*speed*dt*side);
+          if(Math.hypot(detour.x,detour.z)>Math.hypot(motion.x,motion.z))motion=detour;
+        }
+        e.x+=motion.x;e.z+=motion.z;
+        if(blocked){
+          e.vx=motion.x/dt;e.vz=motion.z/dt;
+          if(e.state==='charge'){e.state='recover';e.cd=1.1;this.spark(e.x,e.z,e.color,6,.5);}
+        }
+      }else{e.x+=e.vx*dt;e.z+=e.vz*dt;}
       const c = this.curvedWorld ? { x: e.x, z: e.z } : clampToArena(e.x, e.z, this.arena, CONFIG.arenaRadius, CONFIG.arenaScaleZ, e.radius);
       if (c.x !== e.x || c.z !== e.z) { e.vx *= -0.65; e.vz *= -0.65; }
       e.x = c.x; e.z = c.z;
@@ -752,7 +816,10 @@ export class Simulation {
     const radius=b.explosionRadius;
     this.ring(b.x,b.z,b.color,radius,.75);this.ring(b.x,b.z,COLORS.white,radius*.65,.32);
     this.spark(b.x,b.z,b.color,85,2);this.spark(b.x,b.z,COLORS.white,25,1.8);this.trauma=Math.max(this.trauma,.45);
-    for(const e of this.enemies)if(!e.dead&&distance(b,e)<radius+e.radius){const d=distance(b,e);this.damageEnemy(e,b.damage*(1-d/(radius+3)));const force=12/Math.max(.3,d);e.vx+=(e.x-b.x)*force;e.vz+=(e.z-b.z)*force;}
+    for(const e of this.enemies)if(!e.dead&&distance(b,e)<radius+e.radius){const d=distance(b,e);this.damageEnemy(e,b.damage*(1-d/(radius+3)),false,b);const force=12/Math.max(.3,d);e.vx+=(e.x-b.x)*force;e.vz+=(e.z-b.z)*force;}
+    for(const o of this.obstacles)if(!o.broken&&distance(o,b)<radius+2)this.damageObstacle(o,b.damage);
+    // A slow nova clears nearby hostile shots, opening a route through crossfire.
+    for(const shot of this.bullets)if(shot.enemy&&distance(shot,b)<radius)shot.life=0;
     this.emit('explosion',{x:b.x,size:2});
   }
   updateBullets(dt) {
@@ -778,6 +845,10 @@ export class Simulation {
         b.x += Math.cos(b.angle) * delta; b.z -= Math.sin(b.angle) * delta; b.wave = wave;
       }
       b.x += b.vx * dt; b.z += b.vz * dt; b.life -= dt;
+      if(this.curvedWorld&&this.shotMotionResolver){
+        const fraction=this.shotMotionResolver(b,b.x-b.px,b.z-b.pz);
+        if(fraction<1){b.x=b.px+(b.x-b.px)*fraction;b.z=b.pz+(b.z-b.pz)*fraction;this.spark(b.x,b.z,b.enemy?'#ff4c77':b.color,3,.3);if(b.explosionRadius)this.explodeProjectile(b);else b.life=0;continue;}
+      }
       if(b.life<=0&&b.explosionRadius){this.explodeProjectile(b);continue;}
       if (Math.abs(b.x) > (this.curvedWorld ? 70 : 37) || Math.abs(b.z) > (this.curvedWorld ? 70 : 31)) { b.life = 0; continue; }
       for(const o of this.obstacles)if(!o.broken&&o.warmup<=0&&this.obstacleContact(b,o,b.radius)){
@@ -803,7 +874,11 @@ export class Simulation {
           if (segmentCircle(b.px, b.pz, b.x, b.z, e.x, e.z, e.radius + b.radius)) {
             if(b.explosionRadius){this.explodeProjectile(b);break;}
             b.hitIds.add(e.id);
-            this.damageEnemy(e, b.damage);
+            this.damageEnemy(e,b.damage,false,{x:b.px,z:b.pz});
+            if(b.homing&&!b.detonated){
+              b.detonated=true;this.ring(b.x,b.z,b.color,1.65,.3);this.spark(b.x,b.z,b.color,12,.65);
+              for(const neighbor of this.grid.query(b.x,b.z,2.4))if(neighbor!==e&&!neighbor.dead&&neighbor.warmup<=0&&distance(neighbor,b)<1.65+neighbor.radius)this.damageEnemy(neighbor,1.2,false,{x:b.px,z:b.pz});
+            }
             e.vx += b.vx * (e.type === 'boss' ? 0.01 : 0.035); e.vz += b.vz * (e.type === 'boss' ? 0.01 : 0.035);
             this.spark(b.x, b.z, b.color, 3, 0.4);
             if ((b.weapon === 2 || b.weapon===4)&&!b.chained){b.chained=true;this.chainLightning(e.x,e.z,b.weapon===4?2:1,b.weapon===4?1.6:.9);}
@@ -821,7 +896,9 @@ export class Simulation {
       const d = distance(s, p);
       const droneDistance=distance(s,drone);
       const radius = CONFIG.pickupRadius + this.upgrades.magnet * 3;
-      if(droneDistance<(drone.type==='collector'?12:4.5)&&droneDistance<d){
+      if(this.salvageTime>0&&s.type==='energy'&&d<24){
+        s.vx=damp(s.vx,(p.x-s.x)/Math.max(d,.1)*38,14,dt);s.vz=damp(s.vz,(p.z-s.z)/Math.max(d,.1)*38,14,dt);
+      } else if(droneDistance<(drone.type==='collector'?12:4.5)&&droneDistance<d){
         s.vx=damp(s.vx,(drone.x-s.x)/Math.max(droneDistance,.1)*27,9,dt);s.vz=damp(s.vz,(drone.z-s.z)/Math.max(droneDistance,.1)*27,9,dt);
       } else if (d < radius) {
         s.vx = damp(s.vx, (p.x - s.x) / Math.max(d, 0.1) * 23, 9, dt);
@@ -865,13 +942,14 @@ export class Simulation {
   updateRibbonHits(){
     const p=this.player;
     for(const a of this.attacks)if(a.ribbon&&a.life>0){
-      a.x=p.x;a.z=p.z;a.angle=p.aim;
+      a.x=p.x;a.z=p.z;a.angle=p.angle;
       let previous=ribbonPoint(a,a.angle,a.reach,this.worldTime,0);
       for(let i=1;i<=16;i++){
         const point=ribbonPoint(a,a.angle,a.reach,this.worldTime,i/16);
         for(const e of this.grid.query(p.x,p.z,7))if(!e.dead&&e.warmup<=0&&!a.hitIds.has(e.id)&&segmentCircle(previous.x,previous.z,point.x,point.z,e.x,e.z,e.radius+.26)){
           a.hitIds.add(e.id);this.damageEnemy(e,e.type==='boss'?18:e.type==='pillar'?32:Math.max(55,e.hp));this.spark(e.x,e.z,COLORS.pink,20,.9);
         }
+        for(const b of this.bullets)if(b.enemy&&b.life>0&&segmentCircle(previous.x,previous.z,point.x,point.z,b.x,b.z,b.radius+.2)){b.life=0;this.spark(b.x,b.z,a.color,4,.4);}
         previous=point;
       }
     }

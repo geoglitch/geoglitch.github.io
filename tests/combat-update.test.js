@@ -23,18 +23,18 @@ test('pincer waves create two distinct groups on opposing sides',()=>{
   assert.ok(centers[0].x*centers[1].x+centers[0].z*centers[1].z<0);
 });
 test('diamonds pursue, cubes scatter, prisms retreat and crosses orbit',()=>{
-  const velocity=(type,x)=>{const s=arena();const e=s.spawnEnemy(type,x,0,0);e.phase=1;e.maneuverClock=100;for(let i=0;i<15;i++){grid(s);s.updateEnemies(CONFIG.step);}return e;};
+  const velocity=(type,x)=>{const s=arena();const e=s.spawnEnemy(type,x,0,0);e.phase=-Math.PI/2;e.maneuverClock=100;for(let i=0;i<15;i++){grid(s);s.updateEnemies(CONFIG.step);}return e;};
   assert.ok(velocity('diamond',10).vx<0);assert.ok(velocity('cube',3).vx>0);assert.ok(velocity('prism',8).vx>0);
   const spinner=velocity('spinner',8);assert.ok(Math.abs(spinner.vz)>Math.abs(spinner.vx));
 });
 test('Twin Echo deploys exactly two temporary ships and returns to the previous weapon',()=>{
-  const s=arena();s.spawnWeapon(3,0,0);s.updateWeaponDrops(CONFIG.step);s.spawnWeapon(7,0,0);s.updateWeaponDrops(CONFIG.step);s.player.shotCD=0;s.melee();
+  const s=arena();s.spawnWeapon(3,0,0);s.updateWeaponDrops(CONFIG.step);s.spawnWeapon(7,0,0);s.updateWeaponDrops(CONFIG.step);s.equipWeapon(7);s.player.shotCD=0;s.melee();
   assert.equal(s.sisters.length,2);assert.equal(s.supports.length,1);assert.equal(s.player.weapon,3);assert.equal(s.player.ammo[7],WEAPONS[7].ammo-1);
   const ammo=s.player.ammo[7];s.equipWeapon(7);s.player.shotCD=0;s.melee();assert.equal(s.sisters.length,2);assert.equal(s.player.ammo[7],ammo);
   s.updateSisters(WEAPONS[7].duration+.1);assert.equal(s.sisters.length,0);assert.ok(s.player.sisterCD>0);
 });
 test('the sister ships independently fire at different nearby threats',()=>{
-  const s=arena();s.spawnWeapon(7,0,0);s.updateWeaponDrops(CONFIG.step);s.player.shotCD=0;s.melee();s.spawnEnemy('guard',-4,9,0);s.spawnEnemy('guard',4,9,0);s.updateSisters(.25);
+  const s=arena();s.spawnWeapon(7,0,0);s.updateWeaponDrops(CONFIG.step);s.equipWeapon(7);s.player.shotCD=0;s.melee();s.spawnEnemy('guard',-4,9,0);s.spawnEnemy('guard',4,9,0);s.updateSisters(.25);
   const shots=s.bullets.filter(b=>b.owner==='sister');assert.equal(shots.length,2);assert.equal(new Set(shots.map(b=>b.targetId)).size,2);
 });
 test('controller weapon cycling skips a sister-ship module while it recharges',()=>{
@@ -67,8 +67,8 @@ test('paired gates cross the arena and never bounce a stationary ship back autom
   s.player.x=25;s.updatePlayer(CONFIG.step,{});s.player.x=18;s.updatePlayer(CONFIG.step,{});assert.equal(s.player.x,-18);
 });
 test('the surface motion resolver prevents a ship from flying straight through a raised ridge',()=>{
-  const surface=new Surface();surface.update(0,1);let blocked=0;
-  for(let i=0;i<250;i++){const step=surface.resolveMotion(-.2,0);if(surface.blocked)blocked++;surface.advance(step.x,step.z);}
+  const surface=new Surface();surface.terrainStrength=1;surface.anchor={x:-14,y:3,z:-24};surface.advance(0,0);let blocked=0;
+  for(let i=0;i<250;i++){const step=surface.resolveMotion(.2,0);if(surface.blocked)blocked++;surface.advance(step.x,step.z);}
   assert.ok(blocked>0);assert.ok(surface.ridgeHeight(surface.anchor)<.8);
   const s=arena();s.movementResolver=()=>({x:0,z:0});s.updatePlayer(CONFIG.step,{moveX:1,dash:true});assert.equal(s.player.x,0);
 });
@@ -77,7 +77,7 @@ test('a new world request cannot restart an unfinished ground morph',()=>{
 });
 test('both travel gate approaches have a passable opening through raised terrain',()=>{
   for(const side of[-1,1]){
-    const s=new Surface();s.update(0,1);const goal={x:side*18,z:0};
+    const s=new Surface();s.terrainStrength=1;s.advance(0,0);const goal={x:side*18,z:0};
     for(const z of[0,2,-2,4,-4,7,-7,10,-10])if(s.ridgeHeight(s.map(goal.x,z).point)<.35){goal.z=z;break;}
     for(let i=0;i<300&&Math.hypot(goal.x,goal.z)>1;i++){s.gateCenters=[s.map(goal.x,goal.z).point];const direction=s.steerTowards(goal),move=s.resolveMotion(direction.x*.22,direction.z*.22);s.advance(move.x,move.z);goal.x-=move.x;goal.z-=move.z;}
     assert.ok(Math.hypot(goal.x,goal.z)<1);
@@ -102,7 +102,7 @@ test('drive upgrades improve navigation modestly and preserve a boost cooldown',
   upgraded.updatePlayer(CONFIG.step,{dash:true,moveX:1});assert.ok(upgraded.player.dashCD>=1);
 });
 test('tap routes can go around solid ridges to all five opening weapon areas',()=>{
-  for(const [x,z] of [[-14,9],[14,14],[8,-18],[-17,-17],[0,34]]){
+  for(const [x,z] of [[-7,9],[7,-7],[18,15],[-17,-17],[0,34]]){
     const surface=new Surface(),goal={x,z},gates=[{x:-18,z:0},{x:18,z:0}];surface.update(0,1);
     for(let i=0;i<600&&Math.hypot(goal.x,goal.z)>1;i++){
       surface.update(CONFIG.step,1);surface.landingCenters=Math.hypot(goal.x,goal.z)<16?[surface.map(goal.x,goal.z).point]:[];
