@@ -34,9 +34,10 @@ export function segmentCircle(ax, az, bx, bz, cx, cz, r) {
 }
 
 export class SpatialGrid {
-  constructor(size = 4) { this.size = size; this.cells = new Map(); }
-  clear() { this.cells.clear(); }
+  constructor(size = 4) { this.size = size; this.cells = new Map(); this.maxRadius=0; }
+  clear() { this.cells.clear(); this.maxRadius=0; }
   insert(entity) {
+    this.maxRadius=Math.max(this.maxRadius,entity.radius||0);
     const k = `${Math.floor(entity.x / this.size)},${Math.floor(entity.z / this.size)}`;
     const bucket = this.cells.get(k);
     if (bucket) bucket.push(entity); else this.cells.set(k, [entity]);

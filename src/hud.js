@@ -1,5 +1,6 @@
 import { CONFIG, COLORS, WEAPONS, DRONES } from './config.js';
 import { clamp, TAU } from './math.js';
+import { gameLayout } from './layout.js';
 
 const FONT = '"Space Grotesk", monospace';
 const DISPLAY = '"Barlow Condensed", Impact, sans-serif';
@@ -31,14 +32,20 @@ export class HUD {
     ctx.beginPath(); ctx.moveTo(x, y - size); ctx.lineTo(x + size * 0.7, y); ctx.lineTo(x, y + size); ctx.lineTo(x - size * 0.7, y); ctx.closePath();
     fill ? ctx.fill() : ctx.stroke();
   }
-  area(id, x, y, w, h) { this.hitAreas.push({ id, x, y, w, h }); }
+  area(id, x, y, w, h) { this.hitAreas.push({ id, x:x+(this.offsetX||0), y:y+(this.offsetY||0), w, h }); }
+  worldMargin() {return this.layout?.short||(this.input.touch&&!this.layout?.compact)?60:170;}
+  project(x,y,z) {const p=this.renderer.screenPoint(x,y,z);return {...p,x:p.x-(this.offsetX||0),y:p.y-(this.offsetY||0)};}
   hit(nx, ny) {
-    const x=nx*this.width,y=ny*this.height,areas=[...this.hitAreas].reverse().filter(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h);
+    const x=nx*(this.canvasWidth||this.width),y=ny*(this.canvasHeight||this.height),areas=[...this.hitAreas].reverse().filter(a=>x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h);
     // HUD controls keep priority. Where world markers overlap, the symbol
     // nearest the finger wins instead of whichever happened to be drawn last.
     return (areas.find(a=>!a.id.startsWith('navigate'))||areas.sort((a,b)=>Math.hypot(x-a.x-a.w/2,y-a.y-a.h/2)-Math.hypot(x-b.x-b.w/2,y-b.y-b.h/2))[0])?.id;
   }
-  draw(ctx, w, h) {
+  draw(ctx,w,h) {
+    this.canvasWidth=w;this.canvasHeight=h;this.layout=this.input.layout||gameLayout(w,h);const safe=this.layout.safe;
+    this.offsetX=safe.x;this.offsetY=safe.y;ctx.save();ctx.translate(safe.x,safe.y);this.drawContents(ctx,safe.width,safe.height);ctx.restore();
+  }
+  drawContents(ctx, w, h) {
     this.width = w; this.height = h; this.hitAreas = [];
     const sim = this.sim, p = sim.player, t = sim.worldTime, mobile = w < 760;
     this.light = false;
@@ -58,8 +65,8 @@ export class HUD {
       const bar = clamp(sim.comboTime / 6, 0, 1);
       this.line(ctx, pad, 109, pad + 70, 109, '#203c3c', 2);
       this.line(ctx, pad, 109, pad + 70 * bar, 109, COLORS.jade, 2);
-      const notice=sim.chainNotice?.life>0?sim.chainNotice:sim.sweepNotice?.life>0?sim.sweepNotice:null;
-      if(notice){ctx.save();ctx.globalAlpha=Math.min(1,notice.life*3);this.text(ctx,`${notice===sim.chainNotice?'CHAIN ×'+notice.count:'SWEEP'}  +${notice.bonus}`,pad,129,mobile?10:12,notice===sim.chainNotice?COLORS.gold:COLORS.jade,'left',600);ctx.restore();}
+      const notice=sim.fractureNotice?.life>0?sim.fractureNotice:sim.cascadeNotice?.life>0?sim.cascadeNotice:sim.chainNotice?.life>0?sim.chainNotice:sim.sweepNotice?.life>0?sim.sweepNotice:null;
+      if(notice){const label=notice===sim.fractureNotice?'FRACTURE CLEAR':notice===sim.cascadeNotice?'CASCADE ×'+notice.count:notice===sim.chainNotice?'CHAIN ×'+notice.count:'SWEEP';ctx.save();ctx.globalAlpha=Math.min(1,notice.life*3);this.text(ctx,`${label}  +${notice.bonus}`,pad,129,mobile?10:12,notice===sim.sweepNotice?COLORS.jade:COLORS.gold,'left',600);ctx.restore();}
       const minutes=Math.floor(sim.time/60),seconds=Math.floor(sim.time%60);
       this.text(ctx,`${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`,mobile?w*.57:w/2,33,mobile?18:22,sim.level.color,'center',600);
       const pressure=Math.min(1,sim.enemies.length/70);for(let i=0;i<12;i++)this.line(ctx,w/2-29+i*5,58,w/2-29+i*5,64,i/12<pressure?sim.level.color:'#31425d',2);
@@ -70,7 +77,7 @@ export class HUD {
       this.text(ctx, `BEST ${String(Math.max(sim.score, sim.highScore)).padStart(7, '0')}`, w - pad, 64, 9, COLORS.dim, 'right');
       const boss = sim.enemies.find(e => e.type === 'boss' && !e.dead);
       if (boss) {
-        const bw = Math.min(360, w * 0.5), bx = w / 2 - bw / 2;
+        const bw = Math.min(360, w * (this.layout?.short?.38:.5)), bx = w / 2 - bw / 2;
         this.text(ctx, boss.name, w / 2, 99, 11, COLORS.orange, 'center', 600);
         this.line(ctx, bx, 117, bx + bw, 117, '#5a2b2c', 4);
         this.line(ctx, bx, 117, bx + bw * Math.max(0, boss.hp / boss.maxHp), 117, COLORS.orange, 4);
@@ -96,6 +103,7 @@ export class HUD {
     if (this.tuningOpen) this.drawTuning(ctx, w, h);
     if (this.debug) {
       this.text(ctx, `${this.fps.toFixed(0)} FPS / ${sim.enemies.length} TARGETS / ${sim.bullets.length} SHOTS / ${this.renderer.scene.getActiveMeshes().length} MESHES`, pad, h - 10, 10, COLORS.gold);
+      this.text(ctx,`${this.renderer.canvas.dataset.lastPointer||''} / ${this.input.touches.size} CONTACTS / ${this.renderer.navigationEntity?.type|| (this.renderer.navigationTarget?'FLOOR':'IDLE')}`,pad,h-38,10,COLORS.gold);
     }
     if (sim.flash > 0 && !sim.reduced) {
       ctx.fillStyle = `rgba(125,255,221,${Math.min(0.12, sim.flash * 0.6)})`; ctx.fillRect(0, 0, w, h);
@@ -118,8 +126,8 @@ export class HUD {
     this.text(ctx, 'TAP TO MOVE   ·   AUTO FIRE   ·   FLOOR PULSE', w / 2, h - 29, 8, COLORS.dim, 'center');
   }
   drawBeacon(ctx,target,name,color,exit=false){
-    const w=this.width,h=this.height,pos=this.renderer.screenPoint(target.x,.5,target.z);
-    const inside=pos.visible&&pos.x>45&&pos.x<w-45&&pos.y>150&&pos.y<h-170;
+    const w=this.width,h=this.height,pos=this.project(target.x,.5,target.z);
+    const inside=pos.visible&&pos.x>45&&pos.x<w-45&&pos.y>(this.layout?.short?80:150)&&pos.y<h-this.worldMargin();
     let x=pos.x,y=pos.y;
     if(!inside){const angle=Math.atan2(target.x,target.z);x=w/2+Math.sin(angle)*(w/2-50);y=h/2-Math.cos(angle)*(h/2-160);}
     if(exit){this.diamond(ctx,x,y,10,color,false);this.text(ctx,name,x,y+22,11,color,'center',600);}
@@ -130,15 +138,15 @@ export class HUD {
   drawWeaponBeacons() {
     // Generous invisible tap regions stay attached to the actual floor symbols.
     for(const drop of this.sim.weaponDrops){
-      const pos=this.renderer.screenPoint(drop.x,.16,drop.z);
-      if(pos.visible&&pos.x>28&&pos.x<this.width-28&&pos.y>145&&pos.y<this.height-170)this.area(`navigateWeapon${drop.id}`,pos.x-28,pos.y-28,56,56);
+      const pos=this.project(drop.x,.16,drop.z);
+      if(pos.visible&&pos.x>28&&pos.x<this.width-28&&pos.y>(this.layout?.short?75:145)&&pos.y<this.height-this.worldMargin())this.area(`navigateWeapon${drop.id}`,pos.x-28,pos.y-28,56,56);
     }
   }
   drawWorldMarks(ctx) {
     const sim = this.sim;
-    const project = (x, y, z) => this.renderer.screenPoint(x, y, z);
+    const project = (x, y, z) => this.project(x, y, z);
     for(const gate of sim.gates){
-      const pos=project(gate.x,1.8,gate.z),inside=pos.visible&&pos.x>35&&pos.x<this.width-35&&pos.y>150&&pos.y<this.height-170,a=Math.atan2(gate.x,gate.z),x=inside?pos.x:this.width/2+Math.sin(a)*(this.width/2-32),y=inside?pos.y:this.height/2-Math.cos(a)*(this.height/2-170);
+      const pos=project(gate.x,1.8,gate.z),inside=pos.visible&&pos.x>35&&pos.x<this.width-35&&pos.y>(this.layout?.short?80:150)&&pos.y<this.height-this.worldMargin(),a=Math.atan2(gate.x,gate.z),x=inside?pos.x:this.width/2+Math.sin(a)*(this.width/2-32),y=inside?pos.y:this.height/2-Math.cos(a)*(this.height/2-170);
       ctx.strokeStyle=gate.color;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(x,y,10,15,0,0,TAU);ctx.stroke();this.line(ctx,x-6,y,x+6,y,gate.color,2);this.line(ctx,x+2,y-4,x+6,y,gate.color,2);this.line(ctx,x+2,y+4,x+6,y,gate.color,2);this.area(`navigateGate${gate.id}`,x-25,y-25,50,50);
     }
     for(const reactor of sim.enemies.filter(e=>e.type==='anchor'&&!e.dead&&Math.hypot(e.x,e.z)<28)){
@@ -146,7 +154,7 @@ export class HUD {
       this.diamond(ctx,pos.x,pos.y,7,COLORS.gold,false);this.area(`navigateBoss${reactor.id}`,pos.x-20,pos.y-20,40,40);
     }
     for(const boss of sim.enemies.filter(e=>(e.type==='boss'||e.type==='pillar')&&!e.dead)){
-      const pos=project(boss.x,1,boss.z),inside=pos.visible&&pos.x>45&&pos.x<this.width-45&&pos.y>160&&pos.y<this.height-170,angle=Math.atan2(boss.x,boss.z),x=inside?pos.x:this.width/2+Math.sin(angle)*(this.width/2-50),y=inside?pos.y:this.height/2-Math.cos(angle)*(this.height/2-160);
+      const pos=project(boss.x,1,boss.z),inside=pos.visible&&pos.x>45&&pos.x<this.width-45&&pos.y>(this.layout?.short?90:160)&&pos.y<this.height-(this.layout?.short?65:170),angle=Math.atan2(boss.x,boss.z),x=inside?pos.x:this.width/2+Math.sin(angle)*(this.width/2-50),y=inside?pos.y:this.height/2-Math.cos(angle)*(this.height/2-160);
       ctx.save();ctx.strokeStyle=boss.type==='pillar'?'#74ffd5':'#ff75c7';ctx.lineWidth=2;
       if(boss.type==='pillar'){for(let i=0;i<3;i++)ctx.strokeRect(x-9,y-19+i*12,18,9);}
       else{ctx.beginPath();for(let i=0;i<=6;i++){const a=i*TAU/6;i?ctx.lineTo(x+Math.cos(a)*15,y+Math.sin(a)*15):ctx.moveTo(x+Math.cos(a)*15,y+Math.sin(a)*15);}ctx.stroke();this.diamond(ctx,x,y,6,'#ff75c7',false);}
@@ -160,13 +168,13 @@ export class HUD {
         if(pos.visible){ctx.strokeStyle = e.color; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
         ctx.beginPath(); ctx.ellipse(pos.x, pos.y, 11 + Math.sin(e.age * 12) * 2, 5, 0, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;}
       }
-      if (e.windup > 0 && (e.type === 'prism' || e.type === 'guard' || e.state === 'windup')) {
+      if (e.windup > 0 && (e.type === 'prism' || e.type === 'guard' || e.type==='weaver' || e.state === 'windup')) {
         const pos = project(e.x, 0.7, e.z);
         const target = e.type === 'dart' ? project(e.x + e.aimX * 17, 0.1, e.z + e.aimZ * 17) : project(e.aimX, 0.1, e.aimZ);
         if(pos.visible&&target.visible){ctx.save(); ctx.setLineDash([4, 7]); this.line(ctx, pos.x, pos.y, target.x, target.y, `${e.color}99`, 1); ctx.restore();
         ctx.strokeStyle = e.color; ctx.beginPath(); ctx.arc(target.x, target.y, 9, 0, TAU); ctx.stroke();}
       }
-      if((e.elite||e.type==='pillar')&&e.warmup<=0){const pos=project(e.x,2,e.z);if(pos.visible){this.line(ctx,pos.x-12,pos.y-11,pos.x+12,pos.y-11,'#172844',4);this.line(ctx,pos.x-12,pos.y-11,pos.x-12+24*Math.max(0,e.hp/e.maxHp),pos.y-11,e.color,2);}}
+      if((e.elite||e.type==='pillar'||e.type==='weaver'||(e.type==='fracture'&&e.fractureStage>0))&&e.warmup<=0){const pos=project(e.x,e.type==='fracture'?e.width+.6:2,e.z);if(pos.visible){const half=e.type==='fracture'?12+e.fractureStage*5:12;this.line(ctx,pos.x-half,pos.y-11,pos.x+half,pos.y-11,'#172844',4);this.line(ctx,pos.x-half,pos.y-11,pos.x-half+half*2*Math.max(0,e.hp/e.maxHp),pos.y-11,e.color,2);}}
     }
     // A small, stable warning survives the horizon and never hides the ship.
     const threats=sim.enemies.filter(e=>!e.dead&&e.warmup<=0&&e.type!=='anchor'&&Math.hypot(e.x,e.z)<14).sort((a,b)=>Math.hypot(a.x,a.z)-Math.hypot(b.x,b.z));
@@ -178,7 +186,7 @@ export class HUD {
       ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.fillStyle='#ff638d';ctx.shadowColor='#ff638d';ctx.shadowBlur=8;ctx.beginPath();ctx.moveTo(0,-8);ctx.lineTo(-5,4);ctx.lineTo(5,4);ctx.closePath();ctx.fill();ctx.restore();
     }
     if (sim.mode === 'playing' && !this.input.touch && this.input.mouse.active && (Math.hypot(sim.player.vx,sim.player.vz)<.5||this.input.mouse.down)) {
-      const x = this.input.mouse.x * this.width, y = this.input.mouse.y * this.height;
+      const x = this.input.mouse.x * (this.canvasWidth||this.width)-(this.offsetX||0), y = this.input.mouse.y * (this.canvasHeight||this.height)-(this.offsetY||0);
       ctx.globalAlpha = 0.75;
       ctx.strokeStyle = WEAPONS[sim.player.weapon].color; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(x, y, 8, 0, TAU); ctx.stroke();
@@ -190,7 +198,7 @@ export class HUD {
     if (sim.mode === 'playing') {
       const pos = project(sim.player.x, 0.1, sim.player.z);
       if(sim.player.hp>0){
-        const points=this.renderer.shipScreenPoints();
+        const points=this.renderer.shipScreenPoints().map(p=>({x:p.x-(this.offsetX||0),y:p.y-(this.offsetY||0)}));
         ctx.save();ctx.beginPath();points.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));ctx.closePath();ctx.fillStyle='#102d46cc';ctx.fill();ctx.strokeStyle='#071a30';ctx.lineWidth=4;ctx.stroke();ctx.strokeStyle='#efffff';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
       }
       const hurtAge=sim.time-sim.lastHurt;
@@ -206,23 +214,24 @@ export class HUD {
   }
   drawTopIcons(ctx, w, h) {
     const x = w - 28, y = this.sim.mode === 'attract' ? 31 : 96;
-    this.area('settings', x - 20, y - 20, 40, 40);
+    this.area('settings', x - 22, y - 22, 44, 44);
     for (let i = 0; i < 3; i++) {
       this.line(ctx, x - 8, y - 6 + i * 6, x + 8, y - 6 + i * 6, COLORS.dim);
       ctx.fillStyle = COLORS.dim; ctx.fillRect(x + (i % 2 ? 3 : -4) - 1, y - 8 + i * 6, 2, 5);
     }
-    const mx = x - 44;
-    this.area('mute', mx - 18, y - 18, 36, 36);
+    const mx = x - 48;
+    this.area('mute', mx - 22, y - 22, 44, 44);
     ctx.strokeStyle = this.audio.muted ? COLORS.orange : COLORS.dim; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(mx - 6, y - 3); ctx.lineTo(mx - 2, y - 3); ctx.lineTo(mx + 3, y - 7); ctx.lineTo(mx + 3, y + 7); ctx.lineTo(mx - 2, y + 3); ctx.lineTo(mx - 6, y + 3); ctx.closePath(); ctx.stroke();
     if (!this.audio.muted) { ctx.beginPath(); ctx.arc(mx + 3, y, 9, -0.7, 0.7); ctx.stroke(); }
     else this.line(ctx, mx - 8, y - 10, mx + 9, y + 10, COLORS.orange);
     if (this.sim.mode === 'playing') {
-      this.area('pause', x - 101, y - 18, 36, 36);
-      ctx.fillStyle = COLORS.dim; ctx.fillRect(x - 89, y - 6, 2, 12); ctx.fillRect(x - 83, y - 6, 2, 12);
+      this.area('pause', x - 118, y - 22, 44, 44);
+      ctx.fillStyle = COLORS.dim; ctx.fillRect(x - 100, y - 6, 2, 12); ctx.fillRect(x - 94, y - 6, 2, 12);
     }
   }
   drawWeapons(ctx,w,h,mobile){
+    if(this.input.touch){this.drawTouchWeapons(ctx,w,h);return;}
     const x=mobile?14:36,y=h-(this.input.touch?30:69),p=this.sim.player,current=WEAPONS[p.weapon],top=mobile?y-88:y;
     this.weaponDiagram(ctx,p.weapon,x+17,top-45,32,current.color);
     if(current.ranged)this.text(ctx,String(p.ammo[p.weapon]),x+44,top-44,14,current.color,'left',600);
@@ -273,18 +282,26 @@ export class HUD {
     this.ability(ctx, w - 142, h - 75, r, 1 - clamp(p.dashCD / CONFIG.dashCooldown, 0, 1), COLORS.jade, '»', '', 'SPACE', 'dash');
     this.ability(ctx, w - 62, h - 75, r, 1 - clamp(p.burstCD / CONFIG.burstCooldown, 0, 1), COLORS.jade, '◎', 'FLOOR PULSE', 'E', 'burst');
   }
+  drawTouchWeapons(ctx,w,h) {
+    const p=this.sim.player,current=WEAPONS[p.weapon],layout=this.layout||gameLayout(w,h),infoY=h-(layout.compact?172:layout.short?137:88),infoX=w/2-40;
+    this.weaponDiagram(ctx,p.weapon,infoX,infoY,28,current.color);
+    if(current.ranged)this.text(ctx,String(p.ammo[p.weapon]),infoX+30,infoY,12,current.color,'left',600);
+    this.line(ctx,infoX-12,infoY+20,infoX+70,infoY+20,'#35465f',2);
+    this.line(ctx,infoX-12,infoY+20,infoX-12+82*(1-clamp(p.shotCD/(CONFIG.fireInterval*current.interval),0,1)),infoY+20,current.color,2);
+    layout.slots.forEach((point,i)=>{
+      const x=point.x-(this.offsetX||0),y=point.y-(this.offsetY||0),owned=p.ownedWeapons.includes(i)&&(!WEAPONS[i].ranged||p.ammo[i]>0),active=i===p.weapon;
+      if(owned)this.weaponDiagram(ctx,i,x,y,active?25:20,active?WEAPONS[i].color:'#8da5be');else this.diamond(ctx,x,y,2,'#50617d',false);
+      if(active)this.line(ctx,x-12,y+17,x+12,y+17,current.color,2);
+      if(owned)this.area(`weapon${i}`,x-layout.slotSize/2,y-layout.slotSize/2,layout.slotSize,layout.slotSize);
+    });
+  }
   drawTouch(ctx, w, h) {
-    const p = this.sim.player;
-    for (const [stick, x, y] of [[this.input.left, w * 0.17, h * 0.77], [this.input.right, w * 0.72, h * 0.77]]) {
-      const ox = stick?.ox ?? x, oy = stick?.oy ?? y;
-      ctx.globalAlpha = stick ? 0.65 : 0.16;
-      ctx.strokeStyle = COLORS.jade; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(ox, oy, 52, 0, TAU); ctx.stroke();
-      const dx = (stick?.x ?? x) - ox, dy = (stick?.y ?? y) - oy, d = Math.max(1, Math.hypot(dx, dy) / 39);
-      ctx.fillStyle = '#77ffe035'; ctx.beginPath(); ctx.arc(ox + dx / d, oy + dy / d, 17, 0, TAU); ctx.fill();
-      ctx.globalAlpha = 1;
+    const p=this.sim.player,layout=this.layout||gameLayout(w,h),radius=layout.stickRadius;
+    for(const[stick,rest]of[[this.input.left,layout.left],[this.input.right,layout.right]]){
+      const ox=(stick?.ox??rest.x)-(this.offsetX||0),oy=(stick?.oy??rest.y)-(this.offsetY||0),dx=(stick?.x??rest.x)-(stick?.ox??rest.x),dy=(stick?.y??rest.y)-(stick?.oy??rest.y),d=Math.max(1,Math.hypot(dx,dy)/(radius*.75));
+      ctx.globalAlpha=stick?.65:.18;ctx.strokeStyle=COLORS.jade;ctx.lineWidth=1;ctx.beginPath();ctx.arc(ox,oy,radius,0,TAU);ctx.stroke();ctx.fillStyle='#77ffe035';ctx.beginPath();ctx.arc(ox+dx/d,oy+dy/d,17,0,TAU);ctx.fill();ctx.globalAlpha=1;
     }
-    this.ability(ctx, w - 135, h - 65, 32, 1 - clamp(p.dashCD / CONFIG.dashCooldown, 0, 1), COLORS.jade, '»', '', '', 'dash');
-    this.ability(ctx, w - 52, h - 65, 32, 1 - clamp(p.burstCD / CONFIG.burstCooldown, 0, 1), COLORS.jade, '◎', 'PULSE', '', 'burst');
+    for(const a of layout.abilities){const dash=a.id==='dash';this.ability(ctx,a.x-(this.offsetX||0),a.y-(this.offsetY||0),32,1-clamp((dash?p.dashCD:p.burstCD)/(dash?CONFIG.dashCooldown:CONFIG.burstCooldown),0,1),COLORS.jade,dash?'»':'◎',dash?'':'PULSE','',''+a.id);}
     this.area('touchPause', w / 2 - 30, 0, 60, 65);
   }
   scrim(ctx, w, h, opacity = 0.8) { this.hitAreas=[];ctx.fillStyle = `rgba(3,8,14,${opacity})`; ctx.fillRect(0, 0, w, h); }
@@ -295,7 +312,7 @@ export class HUD {
     items.forEach((s, i) => {
       const y = h * 0.51 + i * 45;
       this.text(ctx, `${this.menuRow === i ? '› ' : ''}${s}`, w / 2, y, 13, this.menuRow === i ? COLORS.jade : COLORS.dim, 'center', 600);
-      this.area(['resume', 'settings', 'restart'][i], w / 2 - 140, y - 20, 280, 40);
+      this.area(['resume', 'settings', 'restart'][i], w / 2 - 140, y - 22, 280, 44);
     });
   }
   drawResult(ctx, w, h, win) {
@@ -331,7 +348,7 @@ export class HUD {
       const x = w / 2 - Math.min(150, w * 0.33), y = h * 0.34 + i * 46;
       this.text(ctx, s, x, y, 11, i === this.menuRow ? COLORS.white : COLORS.dim, 'left', 600);
       this.text(ctx, values[i], w - x, y, 12, i === this.menuRow ? COLORS.jade : '#6d8f88', 'right', 600);
-      this.area(`setting${i}`, x - 20, y - 20, w - x * 2 + 40, 42);
+      this.area(`setting${i}`, x - 20, y - 22, w - x * 2 + 40, 44);
     });
     this.text(ctx, 'ESC / RETURN', w / 2, h * 0.84, 11, COLORS.jade, 'center');
     this.area('closeSettings', w / 2 - 100, h * 0.84 - 25, 200, 50);

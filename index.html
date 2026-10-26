@@ -10,7 +10,8 @@
       *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
       html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#050a10;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
       canvas{display:block;width:100%;height:100%;touch-action:none;outline:none;cursor:crosshair;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-      body{position:fixed;inset:0}
+      body{position:fixed;inset:0;height:100%;height:100dvh}
+      #safe-area-probe{position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
       #boot{position:fixed;inset:0;display:grid;place-content:center;color:#9bf9e8;font:700 24px monospace;letter-spacing:.25em;pointer-events:none}
       #boot small{display:block;margin-top:18px;font:11px monospace;letter-spacing:.35em;color:#50756f;text-align:center}
       #boot[data-state="error"]{padding:28px;text-align:center;font:700 22px monospace;letter-spacing:.05em;background:#111b32}

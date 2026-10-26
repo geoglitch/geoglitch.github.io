@@ -2,6 +2,8 @@ import { CONFIG, COLORS, WEAPONS, UPGRADES, DRONES } from './config.js';
 import { LEVELS, BOSS_NAMES } from './levels.js';
 import { wavePosition } from './waves.js';
 import { bossPorts, strikeBoss } from './boss.js';
+import { RIFT_WARNING, RIFT_LIVE, riftTouches, riftDistance } from './rifts.js';
+import { FRACTURE_STAGES, fractureChildren } from './fractures.js';
 import { TAU, clamp, damp, lerp, distance, rng, arenaRadiusAt, clampToArena, segmentCircle, SpatialGrid, ribbonPoint } from './math.js';
 
 const TYPES = {
@@ -11,11 +13,13 @@ const TYPES = {
   mote: { hp: .9, speed: 1.75, radius: .24, value: 35, color: '#57bfff' },
   dart: { hp: 12, speed: 1.05, radius: 0.65, value: 180, color: COLORS.orange },
   prism: { hp: 7, speed: 0.8, radius: 0.66, value: 220, color: COLORS.violet },
+  weaver: { hp: 11, speed: .72, radius: .72, value: 300, color: '#78d9ff' },
   splitter: { hp: 36, speed: .68, radius: 1.55, value: 500, color: COLORS.pink },
   guard: { hp: 28, speed: 0.7, radius: 1, value: 360, color: COLORS.violet },
   anchor: { hp: 7, speed: 0, radius: 1.45, value: 70, color: COLORS.gold },
   boss: { hp: 170, speed: 0.35, radius: 2.8, value: 6000, color: COLORS.orange },
   pillar: { hp: 160, speed: 0, radius: 2.3, value: 3000, color: '#74ffd5' },
+  fracture: FRACTURE_STAGES[0],
 };
 
 export class Simulation {
@@ -31,13 +35,15 @@ export class Simulation {
   }
   reset(mode = 'playing') {
     this.mode = mode; this.previousMode = mode;this.god=false;
-    this.enemies = []; this.bullets = []; this.particles = [];this.sisters=[];this.fragments=[];
+    this.enemies = []; this.bullets = []; this.particles = [];this.sisters=[];this.fragments=[];this.rifts=[];this.riftClock=22;this.riftsCleared=0;
     this.pickups = []; this.rings = []; this.bolts = []; this.events = [];
     this.attacks=[];this.stains=[];this.weaponDrops=[];this.weaponClock=8;this.weaponNotice=null;this.terrainPulse=0;
     this.time = 0; this.musicBeat = 0; this.worldTime = 0; this.levelTime = 0; this.levelIndex = 0;
     this.level = LEVELS[0]; this.score = 0; this.kills = 0;
     this.exitZone=null;this.levelKills=0;this.reactorClock=10;this.dashHits=new Set();this.waveCount=0;this.lastWave=null;this.pillarEncounter=false;this.pillarsSpawned=false;
     this.wavePacks=new Map();this.wavesCleared=0;this.waveWarning=null;this.sweepNotice=null;this.chainNotice=null;this.scorePulse=0;this.reactorChain=0;this.bestReactorChain=0;this.lastDetonation=-10;this.salvageTime=0;
+    this.fractureFamilies=new Map();this.pendingFractures=[];this.fractureClock=32;this.fracturesCleared=0;this.fractureNotice=null;
+    this.rapidKills=[];this.cascadeReady=0;this.cascades=0;this.cascadeNotice=null;
     this.combo = 1; this.comboTime = 0; this.souls = 0; this.credits = 0;
     this.trauma = 0; this.flash = 0; this.spawnClock = 4.8;this.waveHeld=false;this.targetWeaponId=null;this.lastHurt=-100;this.damageTaken=0;
     this.bossSpawned = false; this.bossDefeated = false;
@@ -68,7 +74,7 @@ export class Simulation {
     }
   }
   start() { this.rand = rng(Date.now() & 0xfffffff); this.reset('playing'); this.emit('start'); }
-  createGates(){this.gates=[{id:++this.id,x:-18,z:0,color:'#74caff',placed:false},{id:++this.id,x:18,z:0,color:'#b895ff',placed:false}];}
+  createGates(){this.gates=[{id:++this.id,x:-18,z:0,color:'#74caff',placed:false,warpTime:0},{id:++this.id,x:18,z:0,color:'#b895ff',placed:false,warpTime:0}];}
   selectSupport(index) {
     this.supportChoice = ((index % DRONES.length) + DRONES.length) % DRONES.length;
     const d = DRONES[this.supportChoice];
@@ -174,6 +180,7 @@ export class Simulation {
     e.hp *= 1 + this.level.chapter * 0.16;
     if((this.time>25||this.level.number>2)&&['cube','dart','prism','guard'].includes(type)&&this.rand()<.16){e.elite=true;e.size*=1.65;e.radius*=1.5;e.hp*=5;e.speed*=.76;}
     if(type==='splitter'){e.size=1.55;e.splitDepth=0;}
+    if(type==='fracture')e.fractureStage=0;
     if(type==='mote')e.size*=.48;
     if(type==='pillar'){e.hp=160+this.level.chapter*35;e.size=1;e.landed=false;}
     if (type === 'boss') {
@@ -185,6 +192,37 @@ export class Simulation {
     if(type==='boss'){e.ports=Array(3).fill(e.maxHp*.55/3);e.portAngle=e.phase;e.shielded=true;e.coreIntro=0;}
     this.enemies.push(e);
     return e;
+  }
+  spawnFracture(stage, x, z, familyId, warmup = .6, angle = 0) {
+    const e=this.spawnEnemy('fracture',x,z,warmup);if(!e)return null;
+    Object.assign(e,FRACTURE_STAGES[stage]);
+    e.hp*=1+Math.min(6,this.level.chapter)*.12;e.maxHp=e.hp;e.fractureStage=stage;e.familyId=familyId;e.size=1;
+    e.vx=Math.sin(angle)*5;e.vz=Math.cos(angle)*5;e.angle=angle;e.phase=angle;
+    return e;
+  }
+  spawnFractureEncounter() {
+    if(this.fractureFamilies.size||this.enemies.length>=CONFIG.maxEnemies-6)return false;
+    const p=this.player,a=p.angle+(this.rand()>.5?.65:-.65),d=22;
+    const familyId=++this.id,e=this.spawnFracture(3,p.x+Math.sin(a)*d,p.z+Math.cos(a)*d,familyId,2.2,a);
+    if(!e)return false;
+    this.fractureFamilies.set(familyId,{remaining:1,kills:0,abandoned:false});
+    this.ring(e.x,e.z,e.color,7,2.2);this.emit('fractureArrival',{x:e.x});return true;
+  }
+  releaseFractures() {
+    while(this.pendingFractures.length&&this.enemies.length<CONFIG.maxEnemies){
+      const child=this.pendingFractures.shift();this.spawnFracture(child.stage,child.x,child.z,child.familyId,.65,child.angle);
+    }
+  }
+  rewardCascade(e) {
+    if(this.mode!=='playing'||e.type==='anchor'||e.type==='boss'||e.type==='pillar')return;
+    this.rapidKills=this.rapidKills.filter(k=>this.time-k.time<=1.1);
+    this.rapidKills.push({time:this.time,x:e.x,z:e.z});
+    if(this.time<this.cascadeReady||this.rapidKills.length<8)return;
+    const count=this.rapidKills.length,bonus=Math.round(count*150*Math.min(4,this.combo));
+    this.score+=bonus;this.scorePulse=1;this.comboTime=Math.max(this.comboTime,6);this.cascades++;this.cascadeReady=this.time+3.5;
+    this.cascadeNotice={count,bonus,life:2};
+    for(let i=0;i<8;i++){const a=i*TAU/8;this.pickups.push({id:++this.id,x:e.x,z:e.z,vx:Math.sin(a)*6,vz:Math.cos(a)*6,age:0,type:'energy'});}
+    this.ring(e.x,e.z,COLORS.gold,7,.7);this.ring(e.x,e.z,COLORS.white,4,.35);this.emit('cascade',{count,x:e.x});
   }
   shoot(x, z, angle, options = {}) {
     if (this.bullets.length >= CONFIG.maxBullets) return;
@@ -218,6 +256,7 @@ export class Simulation {
     if (p.burstCD > 0) return;
     p.burstCD = CONFIG.burstCooldown; p.invuln = Math.max(p.invuln, 0.35);
     const radius = CONFIG.burstRadius + this.upgrades.heart * .8;
+    for(const rift of this.rifts)if(!rift.cancelled&&riftDistance(rift,p)<radius){rift.cancelled=true;this.riftsCleared++;this.spark(rift.x,rift.z,COLORS.jade,12,.6);}
     this.terrainPulse++;
     this.ring(p.x,p.z,COLORS.jade,32,1.65);this.ring(p.x,p.z,COLORS.white,18,.8);
     this.spark(p.x, p.z, COLORS.jade, 100, 1.8);
@@ -339,6 +378,25 @@ export class Simulation {
       const a = this.rand() * TAU;
       this.pickups.push({ id: ++this.id, x: e.x, z: e.z, vx: Math.cos(a) * (2 + this.rand() * 6), vz: Math.sin(a) * (2 + this.rand() * 6), age: 0, type: 'energy' });
     }
+    this.rewardCascade(e);
+    if(e.type==='fracture'){
+      const children=fractureChildren(e,this.player),family=this.fractureFamilies.get(e.familyId);
+      this.pendingFractures.push(...children);
+      this.shatter(e.x,e.z,e.color,e.fractureStage>1?16:6);
+      this.emit('fractureBreak',{x:e.x,size:1+e.fractureStage*.5});
+      if(family){
+        family.remaining+=children.length-1;family.kills++;
+        if(family.remaining===0){
+          this.fractureFamilies.delete(e.familyId);
+          if(!family.abandoned&&this.mode==='playing'){
+            const bonus=Math.round(3000*Math.min(6,this.combo));this.score+=bonus;this.scorePulse=1;this.fracturesCleared++;
+            this.fractureNotice={count:family.kills,bonus,life:2.4};this.salvageTime=1.5;this.spawnClock=Math.max(this.spawnClock,2);
+            this.ring(e.x,e.z,COLORS.gold,10,.9);this.emit('fractureClear',{x:e.x,count:family.kills});
+            for(let i=0;i<12;i++){const a=i*TAU/12;this.pickups.push({id:++this.id,x:e.x,z:e.z,vx:Math.sin(a)*8,vz:Math.cos(a)*8,age:0,type:'energy'});}
+          }
+        }
+      }
+    }
     if (e.type === 'splitter' && this.level.number>=16 && this.enemies.length < CONFIG.maxEnemies - 4) {
       for (let i = 0; i < 4; i++) {
         const a = i * TAU / 4,recursive=this.level.number>=31&&e.splitDepth===0;
@@ -361,6 +419,11 @@ export class Simulation {
           this.damageEnemy(near, 14, true);
         }
       }
+    }
+    if(e.type==='weaver'){
+      const group=++this.id;
+      for(let i=0;i<6;i++)this.shoot(e.x,e.z,e.angle+i*TAU/6,{owner:'reclaimed',weapon:0,damage:1.6,speed:26,life:.5,radius:.24,pierce:0,color:e.color,strokeGroup:group,wavePhase:group});
+      this.ring(e.x,e.z,e.color,4,.5);this.emit('explosion',{x:e.x,size:1.2});
     }
     if (this.upgrades.lightning > 0 && !chain) this.chainLightning(e.x, e.z, 2 + this.upgrades.lightning, 1.2 + this.upgrades.lightning*.6);
     if (this.kills % 80 === 0) this.pickups.push({ id: ++this.id, x: e.x, z: e.z, vx: 0, vz: 0, age: 0, type: 'heart' });
@@ -408,12 +471,13 @@ export class Simulation {
     if (item.id === 'heart') { this.player.maxHp = Math.min(8, this.player.maxHp + 1); this.player.hp = this.player.maxHp; }
   }
   nextLevel() {
+    this.rifts=[];this.riftClock=Math.max(this.riftClock,8);
     this.levelIndex++;const base=LEVELS[this.levelIndex%LEVELS.length],cycle=Math.floor(this.levelIndex/LEVELS.length);
     this.level={...base,number:this.levelIndex+1,chapter:Math.min(20,base.chapter+cycle*4),intensity:base.intensity*(1+Math.min(3,cycle*.25))};
     this.levelTime = 0;this.levelKills=0;this.exitZone=null;
     this.pillarEncounter=this.level.number>=7&&this.level.beat===1;this.pillarsSpawned=false;
     this.createGates();
-    if(this.level.boss){this.bullets=this.bullets.filter(b=>!b.enemy);this.enemies=this.enemies.filter(e=>!e.dead).sort((a,b)=>distance(a,this.player)-distance(b,this.player)).slice(0,20);}
+    if(this.level.boss){this.bullets=this.bullets.filter(b=>!b.enemy);this.fractureFamilies.clear();this.pendingFractures=[];this.enemies=this.enemies.filter(e=>!e.dead&&e.type!=='fracture').sort((a,b)=>distance(a,this.player)-distance(b,this.player)).slice(0,20);}
     this.createObstacles();
     this.bossSpawned = false; this.bossDefeated = false; this.shiftWarning = false;
     this.arena.from = this.arena.to; this.arena.to = this.level.sides; this.arena.mix = 0;
@@ -433,7 +497,8 @@ export class Simulation {
     this.time += dt; this.musicBeat += dt * (134 + Math.min(8,this.level.chapter)) / 60; this.levelTime += dt; this.banner = Math.max(0, this.banner - dt);
     this.salvageTime=Math.max(0,this.salvageTime-dt);
     this.scorePulse=Math.max(0,this.scorePulse-dt*3);
-    for(const notice of [this.waveWarning,this.sweepNotice,this.chainNotice])if(notice)notice.life=Math.max(0,notice.life-dt);
+    for(const notice of [this.waveWarning,this.sweepNotice,this.chainNotice,this.cascadeNotice,this.fractureNotice])if(notice)notice.life=Math.max(0,notice.life-dt);
+    for(const gate of this.gates)gate.warpTime=Math.max(0,(gate.warpTime||0)-dt);
     for(const o of this.obstacles)o.warmup=Math.max(0,o.warmup-dt);
     this.arena.mix = Math.min(1, this.arena.mix + dt * 0.3);
     this.arena.rotation = damp(this.arena.rotation, this.arena.targetRotation, 0.6, dt);
@@ -442,6 +507,7 @@ export class Simulation {
     this.grid.clear();
     for (const e of this.enemies) if (!e.dead) this.grid.insert(e);
     this.updateEnemies(dt);
+    this.updateRifts(dt);
     this.updateRibbonHits();
     this.updateBullets(dt);
     this.updatePickups(dt);
@@ -482,14 +548,14 @@ export class Simulation {
     const p = this.player, dx = p.x, dz = p.z;
     p.x = 0; p.z = 0; p.px -= dx; p.pz -= dz;
     if(this.exitZone){this.exitZone.x-=dx;this.exitZone.z-=dz;}
-    for (const list of [this.enemies, this.bullets, this.pickups, this.particles,this.fragments, this.rings, this.bolts, this.supports, this.sisters,this.gates,this.obstacles, this.attacks,this.stains,this.weaponDrops,p.tail]) for (const e of list) {
+    for (const list of [this.enemies, this.bullets, this.pickups, this.particles,this.fragments, this.rings, this.bolts, this.supports, this.sisters,this.gates,this.obstacles, this.attacks,this.stains,this.weaponDrops,this.rifts,this.pendingFractures,this.rapidKills,p.tail]) for (const e of list) {
       e.x -= dx; e.z -= dz;
       if (e.px !== undefined) { e.px -= dx; e.pz -= dz; }
       if (e.tx !== undefined) { e.tx -= dx; e.tz -= dz; }
-      if (e.type === 'prism' || e.type === 'guard') { e.aimX -= dx; e.aimZ -= dz; }
+      if (e.type === 'prism' || e.type === 'guard'||e.type==='weaver') { e.aimX -= dx; e.aimZ -= dz; }
       if (e.trail) for (const point of e.trail) { point.x -= dx; point.z -= dz; }
     }
-    this.enemies = this.enemies.filter(e => {if(e.type==='boss'||e.type==='pillar'||Math.hypot(e.x,e.z)<65)return true;const pack=this.wavePacks.get(e.waveId);if(pack)pack.abandoned=true;return false;});
+    this.enemies = this.enemies.filter(e => {if(e.type==='boss'||e.type==='pillar'||Math.hypot(e.x,e.z)<65)return true;const pack=this.wavePacks.get(e.waveId);if(pack)pack.abandoned=true;const family=this.fractureFamilies.get(e.familyId);if(family){family.abandoned=true;if(--family.remaining===0)this.fractureFamilies.delete(e.familyId);}return false;});
     this.grid.clear(); for (const e of this.enemies) if (!e.dead) this.grid.insert(e);
     return { dx, dz };
   }
@@ -521,7 +587,7 @@ export class Simulation {
       p.vz = damp(p.vz, mz * driveSpeed, ml ? CONFIG.acceleration : CONFIG.drag, dt);
     } else {
       this.spark(p.x, p.z, COLORS.jade, 3, 0.3);
-      for (const e of this.grid.query(p.x, p.z, 3)) if (!e.dead && !this.dashHits.has(e.id) && segmentCircle(p.x,p.z,p.x+p.vx*dt,p.z+p.vz*dt,e.x,e.z,e.radius+1.2)) {
+      for (const e of this.grid.query(p.x, p.z, Math.max(3,this.grid.maxRadius+1.2+Math.hypot(p.vx,p.vz)*dt))) if (!e.dead && !this.dashHits.has(e.id) && segmentCircle(p.x,p.z,p.x+p.vx*dt,p.z+p.vz*dt,e.x,e.z,e.radius+1.2)) {
         this.dashHits.add(e.id);this.damageEnemy(e,6,true);this.ring(e.x,e.z,COLORS.jade,2.4,.35);
         for(const near of this.grid.query(e.x,e.z,2.4))if(near!==e&&!near.dead&&distance(near,e)<2.4)this.damageEnemy(near,1.6,true);
         this.emit('meleeHit',{size:1.1});
@@ -553,6 +619,7 @@ export class Simulation {
       }
       if(cleared){this.score+=cleared*150;this.comboTime=Math.max(this.comboTime,3);}
       p.x=target.x;p.z=target.z;p.gateLatch=target.id;p.warpCD=2.8;p.invuln=Math.max(p.invuln,.6);p.vx*=.3;p.vz*=.3;
+      entered.warpTime=1.1;target.warpTime=1.1;
       this.ring(entered.x,entered.z,entered.color,4.5,.5);this.ring(target.x,target.z,target.color,5,.65);this.spark(target.x,target.z,target.color,35,1);this.emit('warp',{cleared});
     }}
     p.tail.unshift({ x: p.x, z: p.z, angle: p.angle }); if (p.tail.length > 36) p.tail.pop();
@@ -566,15 +633,16 @@ export class Simulation {
     this.waveCount++;
     const pool=this.time<18?['diamond','cube','spinner']:l.enemies;
     const surge=!demo&&!l.boss&&this.time>28&&this.waveCount%5===0,swarm=!surge&&this.time>18&&this.waveCount%3===0;
-    const pattern=surge?'surge':swarm?'swarm':this.waveCount%4===0?'pincer':l.pattern;
-    const count=Math.min(room,surge?Math.ceil(pressure.group*1.5):swarm?Math.max(12,pressure.group*2):demo?8:pressure.group),angle=surge?Math.PI/2-p.angle:this.rand()*TAU;
+    const braid=!demo&&!l.boss&&this.time>10&&this.waveCount%4===2;
+    const pattern=surge?'surge':swarm?'swarm':braid?'braid':this.waveCount%4===0?'pincer':l.pattern;
+    const count=Math.min(room,surge?Math.ceil(pressure.group*1.5):swarm?Math.max(12,pressure.group*2):demo?8:pressure.group+(braid?6:0)),angle=surge?Math.PI/2-p.angle:this.rand()*TAU;
     const hunter=this.time>25&&pool.includes('dart')?'dart':pool.includes('diamond')?'diamond':pool[0];
     const primary=swarm?'mote':pattern==='hunt'?hunter:pool[Math.floor(this.rand()*pool.length)],secondary=pool[Math.floor(this.rand()*pool.length)];
     const warmup=(surge?4:3)*60/(134+Math.min(8,l.chapter));let spawned=0;
     for(let i=0;i<count;i++){
-      const point=wavePosition(pattern,i,count,angle,l.chapter,swarm),type=surge&&i%3===0?'diamond':!swarm&&this.time>18&&i%4===1?secondary:point.side===1&&!swarm?secondary:primary;
+      const point=wavePosition(pattern,i,count,angle,l.chapter,swarm),type=!swarm&&!demo&&this.time>20&&i%16===15?'weaver':surge&&i%3===0?'diamond':!swarm&&this.time>18&&i%4===1?secondary:point.side===1&&!swarm?secondary:primary;
       const e=this.spawnEnemy(type,p.x+point.x,p.z+point.z,warmup);
-      if(e){spawned++;e.waveId=this.waveCount;e.packId=this.waveCount*3+point.side;e.packPhase=e.phase;e.flank=i%2===0?1:-1;e.roamAngle=point.sector+Math.PI/2;}
+      if(e){spawned++;e.waveId=this.waveCount;e.packId=this.waveCount*3+point.side;e.packPhase=e.phase;e.flank=i%2===0?1:-1;e.roamAngle=point.sector+Math.PI/2;e.braided=pattern==='braid';}
     }
     this.wavePacks.set(this.waveCount,{count:spawned,remaining:spawned,abandoned:false});if(this.wavePacks.size>12)this.wavePacks.delete(this.wavePacks.keys().next().value);
     this.lastWave={count:spawned,pattern,type:primary,time:this.time};this.waveWarning={count:spawned,pattern,color:surge?COLORS.pink:TYPES[primary].color,life:warmup,maxLife:warmup};
@@ -587,14 +655,31 @@ export class Simulation {
     for(let i=0;i<room;i++){const phase=i*TAU/room;this.spawnEnemy('anchor',cx+Math.cos(phase)*3,cz+Math.sin(phase)*3,1.3);}
     return room;
   }
+  spawnRift(){
+    if(this.rifts.length)return false;
+    const p=this.player,angle=p.angle+Math.PI/2+(this.rand()-.5)*.45,count=this.time>55?2:1;
+    for(let i=0;i<count;i++){const d=12+i*12;this.rifts.push({id:++this.id,x:p.x+Math.sin(p.angle)*d,z:p.z+Math.cos(p.angle)*d,angle,length:36,width:.3,age:0,warning:RIFT_WARNING,duration:RIFT_LIVE,color:i?'#ff6fb4':'#ffaf59',hitIds:new Set()});}
+    this.emit('riftWarning');return true;
+  }
+  updateRifts(dt){
+    for(const rift of this.rifts){
+      const previous=rift.age;rift.age+=dt;if(rift.cancelled||rift.age<rift.warning||rift.age>rift.warning+rift.duration)continue;
+      if(previous<rift.warning){this.emit('riftFire');this.spark(rift.x,rift.z,rift.color,18,.8);}
+      if(riftTouches(rift,this.player))this.damagePlayer(rift.x,rift.z);
+      for(const e of this.enemies)if(!e.dead&&e.warmup<=0&&e.type!=='boss'&&!rift.hitIds.has(e.id)&&riftTouches(rift,e)){rift.hitIds.add(e.id);this.damageEnemy(e,12,true,rift);}
+    }
+    this.rifts=this.rifts.filter(r=>!r.cancelled&&r.age<r.warning+r.duration);
+  }
   updateDirector(dt) {
     const l = this.level;
+    this.releaseFractures();
     if(this.gates.length&&this.gates.every(g=>distance(g,this.player)>55))this.createGates();
     if(this.curvedWorld)for(const o of this.obstacles)if(Math.hypot(o.x,o.z)>48){
       const a=this.rand()*TAU,r=17+this.rand()*8;
       o.x=Math.cos(a)*r;o.z=Math.sin(a)*r;o.angle=a+Math.PI/2;o.warmup=1.8;o.broken=false;o.hp=o.maxHp;o.id=++this.id;
     }
     const demo = this.mode === 'attract';
+    if(!demo&&!l.boss){this.fractureClock-=dt;if(this.fractureClock<=0&&this.time-this.lastHurt>3&&!this.exitZone){if(this.spawnFractureEncounter())this.fractureClock=42;}}
     const pressure=this.pressure();
     const interval = demo ? 2 : pressure.interval;
     this.spawnClock -= dt;
@@ -611,6 +696,7 @@ export class Simulation {
       this.reactorClock=14+this.rand()*6;
       this.spawnReactorCluster();
     }
+    if(!demo&&!l.boss){this.riftClock-=dt;if(this.riftClock<=0){this.riftClock=14+this.rand()*4;if(this.time-this.lastHurt>2.3&&!this.exitZone)this.spawnRift();}}
     if (l.boss && !this.bossSpawned && this.levelTime > 3) {
       this.bossSpawned = true; this.spawnEnemy('boss', 0, 10, 2);
       this.emit('boss'); this.banner = 3;
@@ -708,6 +794,16 @@ export class Simulation {
           const surge = .8+Math.max(0,Math.sin(e.age*2.5+e.phase))*.5;
           tx=tx*surge*e.surge-nz*e.swerve*.3;tz=tz*surge*e.surge+nx*e.swerve*.3;
         }
+        if(e.type==='fracture'){
+          const stage=e.fractureStage,flank=stage===0?Math.sin(e.age*3+e.phase)*.28:e.flank*.15;
+          tx=nx-nz*flank;tz=nz+nx*flank;
+        }
+        if(e.braided){const weave=Math.sin(e.age*2+e.phase)*.65;tx-=nz*weave;tz+=nx*weave;}
+        if(e.type==='weaver'){
+          const toward=d>18?.75:d<11?-1.1:0;tx=nx*toward-nz*e.flank*.8;tz=nz*toward+nx*e.flank*.8;
+          if(e.cd<=0&&e.windup<=0){e.windup=.95;e.aimX=p.x+p.vx*.22;e.aimZ=p.z+p.vz*.22;e.cd=3.1;}
+          if(e.windup>0){e.windup-=dt;if(e.windup<=0){const a=Math.atan2(e.aimX-e.x,e.aimZ-e.z);for(const side of[-1,1])for(let i=0;i<3;i++)this.shoot(e.x,e.z,a+side*(.18+i*.24),{enemy:true,speed:9+i*.65,life:3,radius:.24,color:e.color});this.ring(e.x,e.z,e.color,2,.35);this.emit('enemyShoot');}}
+        }
         if (e.type === 'prism' || e.type === 'guard') {
           const toward = e.type==='prism'?(d>20?.7:d<14?-1.3:0):(d>15?.7:d<9?-.35:0);
           tx = nx * toward - nz * e.flank*(e.type==='prism'?.7:.25); tz = nz * toward + nx * e.flank*(e.type==='prism'?.7:.25);
@@ -752,7 +848,7 @@ export class Simulation {
         }
         if (e.type !== 'boss'&&e.state!=='charge') {
           let avoidX=0,avoidZ=0;
-          for (const other of this.grid.query(e.x,e.z,4.5)) {
+          for (const other of this.grid.query(e.x,e.z,Math.max(4.5,e.radius+this.grid.maxRadius+2))) {
             if(other===e||other.dead||other.warmup>0)continue;
             const sx=e.x-other.x,sz=e.z-other.z,sd=Math.hypot(sx,sz),space=e.radius+other.radius+(e.type==='mote'?1.3:2);
             if(sd<space){const a=sd>.001?sx/sd:Math.sin(e.phase),b=sd>.001?sz/sd:Math.cos(e.phase),force=(1-sd/space)*2.8;avoidX+=a*force;avoidZ+=b*force;}
@@ -816,7 +912,7 @@ export class Simulation {
     const radius=b.explosionRadius;
     this.ring(b.x,b.z,b.color,radius,.75);this.ring(b.x,b.z,COLORS.white,radius*.65,.32);
     this.spark(b.x,b.z,b.color,85,2);this.spark(b.x,b.z,COLORS.white,25,1.8);this.trauma=Math.max(this.trauma,.45);
-    for(const e of this.enemies)if(!e.dead&&distance(b,e)<radius+e.radius){const d=distance(b,e);this.damageEnemy(e,b.damage*(1-d/(radius+3)),false,b);const force=12/Math.max(.3,d);e.vx+=(e.x-b.x)*force;e.vz+=(e.z-b.z)*force;}
+    for(const e of this.enemies)if(!e.dead&&distance(b,e)<radius+e.radius){const d=distance(b,e),edge=Math.max(0,d-e.radius);this.damageEnemy(e,b.damage*(1-edge/(radius+3)),false,b);const force=12/Math.max(.3,d);e.vx+=(e.x-b.x)*force;e.vz+=(e.z-b.z)*force;}
     for(const o of this.obstacles)if(!o.broken&&distance(o,b)<radius+2)this.damageObstacle(o,b.damage);
     // A slow nova clears nearby hostile shots, opening a route through crossfire.
     for(const shot of this.bullets)if(shot.enemy&&distance(shot,b)<radius)shot.life=0;
@@ -869,7 +965,7 @@ export class Simulation {
         // Sniper fire can ignite the destructible spirit stones.
         for (const e of this.grid.query(b.x, b.z, 2)) if (e.type === 'anchor' && !e.dead && segmentCircle(b.px, b.pz, b.x, b.z, e.x, e.z, e.radius)) { this.damageEnemy(e, 3); b.life = 0; break; }
       } else {
-        for (const e of this.grid.query(b.x, b.z, 4.5)) {
+        for (const e of this.grid.query(b.x, b.z, Math.max(4.5,this.grid.maxRadius+b.radius+Math.hypot(b.x-b.px,b.z-b.pz)))) {
           if (e.dead || e.warmup > 0 || b.hitIds.has(e.id)) continue;
           if (segmentCircle(b.px, b.pz, b.x, b.z, e.x, e.z, e.radius + b.radius)) {
             if(b.explosionRadius){this.explodeProjectile(b);break;}
@@ -946,8 +1042,8 @@ export class Simulation {
       let previous=ribbonPoint(a,a.angle,a.reach,this.worldTime,0);
       for(let i=1;i<=16;i++){
         const point=ribbonPoint(a,a.angle,a.reach,this.worldTime,i/16);
-        for(const e of this.grid.query(p.x,p.z,7))if(!e.dead&&e.warmup<=0&&!a.hitIds.has(e.id)&&segmentCircle(previous.x,previous.z,point.x,point.z,e.x,e.z,e.radius+.26)){
-          a.hitIds.add(e.id);this.damageEnemy(e,e.type==='boss'?18:e.type==='pillar'?32:Math.max(55,e.hp));this.spark(e.x,e.z,COLORS.pink,20,.9);
+        for(const e of this.grid.query(p.x,p.z,Math.max(7,a.reach+this.grid.maxRadius+.26)))if(!e.dead&&e.warmup<=0&&!a.hitIds.has(e.id)&&segmentCircle(previous.x,previous.z,point.x,point.z,e.x,e.z,e.radius+.26)){
+          a.hitIds.add(e.id);this.damageEnemy(e,e.type==='boss'?18:e.type==='pillar'?32:e.type==='fracture'&&e.fractureStage>0?Math.min(28,Math.max(7,e.maxHp*.4)):Math.max(55,e.hp));this.spark(e.x,e.z,COLORS.pink,20,.9);
         }
         for(const b of this.bullets)if(b.enemy&&b.life>0&&segmentCircle(previous.x,previous.z,point.x,point.z,b.x,b.z,b.radius+.2)){b.life=0;this.spark(b.x,b.z,a.color,4,.4);}
         previous=point;

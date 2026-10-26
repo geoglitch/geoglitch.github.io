@@ -93,7 +93,12 @@ export class AudioEngine {
       case'wave':this.noise(e.surge?.45:.24,e.surge?.045:.025,1100*variant,0,pan,'lowpass');break;
       case'reactorChain':this.impact(1.6,pan);this.noise(.17,.065,2000*variant);break;
       case'warp':this.noise(.28,.07,2500*variant,0,pan);break;
+      case'fractureArrival':this.noise(.6,.065,340,0,pan,'lowpass');break;
+      case'fractureBreak':this.impact(e.size||1.8,pan);this.noise(.16,.045,900,0,pan,'lowpass');break;
+      case'cascade':case'fractureClear':this.noise(.26,.065,2800,0,pan);this.tone(165,.32,'triangle',.04,330,0,-.2,1400);this.tone(247.5,.35,'triangle',.025,495,.08,.2,1700);break;
       case'bossAttack':this.impact(1.2);break;
+      case'riftWarning':this.noise(.32,.04,850*variant,0,pan,'lowpass');break;
+      case'riftFire':this.impact(1.3,pan);this.noise(.18,.055,2600*variant,0,pan);break;
       case'victory':[220,261.63,329.63].forEach((f,i)=>this.tone(f,1.4,'triangle',.04,f,i*.12,(i-1)*.3,1700,.08));break;
     }
   }

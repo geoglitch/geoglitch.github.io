@@ -3,13 +3,15 @@ import { TAU } from './math.js';
 const fract=x=>x-Math.floor(x);
 // A low-discrepancy field: waves still arrive together, but never as tight blocks.
 export function wavePosition(pattern,index,count,angle,chapter=0,swarm=false){
-  const groups=pattern==='pincer'?2:pattern==='ritual'?3:1,side=index%groups,n=Math.floor(index/groups);
+  const groups=pattern==='pincer'||pattern==='braid'?2:pattern==='ritual'?3:1,side=index%groups,n=Math.floor(index/groups);
   const population=Math.ceil(count/groups),u=(n+.5)/population,v=fract(n*.61803398875+.31);
   const spread=22+Math.min(4,chapter*.3),depth=10+(swarm?3:0);
   let a=angle+side*TAU/groups,r=spread+v*depth;
   if(pattern==='surge'){
     // Keep a generous, readable 100-degree escape opening in the travel direction.
     a+=Math.PI*50/180+u*Math.PI*260/180;
+  }else if(pattern==='braid'){
+    a+=(u-.5)*2.1+Math.sin(u*TAU)*.22;r=23+v*13;
   }else if(pattern==='pincer'||pattern==='ritual'){
     a+=(u-.5)*(pattern==='pincer'?2.35:1.65);
   }else if(pattern==='flood'){

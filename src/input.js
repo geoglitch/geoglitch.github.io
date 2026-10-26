@@ -49,14 +49,18 @@ export class Input {
     this.canvas.focus({ preventScroll: true });
     this.canvas.setPointerCapture(e.pointerId);
     const p = this.pos(e);
-    if (e.pointerType === 'touch') {
+    if ((e.pointerType === 'touch'||e.pointerType === 'pen')) {
       this.touch = true;
-      const t = { id: e.pointerId, x: p.x, y: p.y, ox: p.x, oy: p.y, sx:p.x,sy:p.y,dragged:false,nx: p.nx, ny: p.ny };
+      const t = { id: e.pointerId, x: p.x, y: p.y, ox: p.x, oy: p.y, sx:p.x,sy:p.y,dragged:false,nx: p.nx, ny: p.ny,role:null };
       this.touches.set(e.pointerId, t);
+      if(this.touches.size>1)for(const contact of this.touches.values())contact.multi=true;
+      const safe=this.layout?.safe;
+      if(safe&&(p.x<safe.x||p.x>safe.x+safe.width||p.y<safe.y||p.y>safe.y+safe.height)){t.button=true;return;}
       const action=this.onTouchButton?.(p.nx,p.ny);
       if(action){t.button=true;t.attack=action==='strike';return;}
-      if (p.nx < 0.5 && !this.left) this.left = t;
-      else if (!this.right) this.right = t;
+      const midpoint=safe?safe.x+safe.width/2:this.canvas.getBoundingClientRect().width/2;
+      if (p.x < midpoint && !this.left) {this.left = t;t.role='move';}
+      else if (p.x >= midpoint && !this.right) {this.right = t;t.role='aim';}
     } else {
       this.touch = false;
       this.mouse.x = p.nx; this.mouse.y = p.ny; this.mouse.active = true;
@@ -67,20 +71,21 @@ export class Input {
   }
   pointerMove(e) {
     const p = this.pos(e);
-    if (e.pointerType === 'touch') {
+    if ((e.pointerType === 'touch'||e.pointerType === 'pen')) {
       const t = this.touches.get(e.pointerId);
       if(t){
         t.x=p.x;t.y=p.y;t.nx=p.nx;t.ny=p.ny;
         t.dragged ||= Math.hypot(t.x-t.sx,t.y-t.sy)>=12;
-        if(!t.button){const dx=t.x-t.ox,dy=t.y-t.oy,length=Math.hypot(dx,dy);if(length>52){t.ox=t.x-dx/length*52;t.oy=t.y-dy/length*52;}}
+        const radius=this.layout?.stickRadius||52;
+        if(!t.button){const dx=t.x-t.ox,dy=t.y-t.oy,length=Math.hypot(dx,dy);if(length>radius){t.ox=t.x-dx/length*radius;t.oy=t.y-dy/length*radius;}}
       }
     } else { this.mouse.x = p.nx; this.mouse.y = p.ny; this.mouse.active = true;if(this.mouse.press)this.mouse.press.dragged ||= Math.hypot(p.x-this.mouse.press.x,p.y-this.mouse.press.y)>=12; }
   }
   pointerUp(e,cancelled=false) {
     const p=this.pos(e);
-    if (e.pointerType === 'touch') {
+    if ((e.pointerType === 'touch'||e.pointerType === 'pen')) {
       const t=this.touches.get(e.pointerId);
-      if(t&&!cancelled&&!t.button&&!t.dragged&&Math.hypot(p.x-t.sx,p.y-t.sy)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
+      if(t&&!cancelled&&!t.button&&!t.dragged&&!t.multi&&Math.hypot(p.x-t.sx,p.y-t.sy)<12)this.actions.push({type:'navigate',x:p.nx,y:p.ny});
       if (this.left?.id === e.pointerId) this.left = null;
       if (this.right?.id === e.pointerId) this.right = null;
       this.touches.delete(e.pointerId);
@@ -104,7 +109,7 @@ export class Input {
     let aimX = worldPoint?.x, aimZ = worldPoint?.z, aimAngle=worldPoint?.screenAngle,manualAim=this.mouse.down&&this.mouse.active&&!this.touch&&Number.isFinite(worldPoint?.screenAngle);
     let fire = this.mouse.down || this.down('KeyJ') || this.just('Strike') || [...this.touches.values()].some(t=>t.attack), assist = this.down('KeyJ')&&!this.mouse.active;
     if (this.left) {
-      const move=radialStick((this.left.x-this.left.ox)/52,(this.left.oy-this.left.y)/52,.10);moveX=move.x;moveZ=move.z;
+      const radius=this.layout?.stickRadius||52,move=radialStick((this.left.x-this.left.ox)/radius,(this.left.oy-this.left.y)/radius,.10);moveX=move.x;moveZ=move.z;
       aimX = undefined; aimZ = undefined; assist = true;
     }
     if (this.right) {

@@ -5,6 +5,9 @@ import { TAU, rng, tangentAimAngle, ribbonPoint } from './math.js';
 import { Surface, add, mul, dot, cross, unit } from './surface.js';
 import { CameraRig } from './camera.js';
 import { bossPorts } from './boss.js';
+import { riftEnds } from './rifts.js';
+import { FRACTURE_STAGES } from './fractures.js';
+import { pickupArt } from './pickup-art.js';
 const v=p=>new Vector3(p.x,p.y,p.z),col=s=>Color3.FromHexString(s);
 
 export function drawableSegment(a,b,eye,view){
@@ -204,23 +207,49 @@ export class GameRenderer {
   weaponPickup(drop) {
     const screen=this.screenPoint(drop.x,.15,drop.z);
     if(!screen.visible||screen.x< -40||screen.x>this.width+40||screen.y< -40||screen.y>this.height+40)return;
-    const color=WEAPONS[drop.weapon].color,f=this.frame(drop.x,drop.z,.16),selected=this.navigationEntity?.type==='weapon'&&this.navigationEntity.id===drop.id;
+    const color=WEAPONS[drop.weapon].color,f=this.frame(drop.x,drop.z,.19),selected=this.navigationEntity?.type==='weapon'&&this.navigationEntity.id===drop.id;
     const point=(x,z)=>f.point.add(f.right.scale(x)).add(f.forward.scale(z));
-    const line=(a,b,c=color,width=.075)=>this.lines.line(point(...a),point(...b),width,c);
-    const circle=r=>{let prev;for(let i=0;i<=24;i++){const a=i*TAU/24,q=[Math.sin(a)*r,Math.cos(a)*r];if(prev)line(prev,q);prev=q;}};
-    const arrow=(x,z)=>{line([x-.16,z-.24],[x,z]);line([x+.16,z-.24],[x,z]);};
-    // Static floor ink: no floating card, plinth, light column or animated exhibit.
-    for(const side of[-1,1]){line([side*1.4,-.35],[side*1.4,.35],color,.05);line([-.35,side*1.4],[.35,side*1.4],color,.05);}
-    if([0,1,8].includes(drop.weapon)){
-      const colors=['#ff5de9','#ffb14a','#b7ff48','#54fff1','#48adff','#a28bff'];let prev;
-      for(let i=0;i<=20;i++){const u=i/20,q=[-1.1+u*2.2,Math.sin(u*TAU)*.65];if(prev)line(prev,q,drop.weapon===8?colors[Math.min(5,Math.floor(u*6))]:color,.11);prev=q;}
-    } else if(drop.weapon===2){circle(.85);arrow(0,1.1);arrow(0,-.6);}
-    else if(drop.weapon===3)for(let i=-2;i<=2;i++){line([i*.08,-.8],[i*.43,.8]);arrow(i*.43,.8);}
-    else if(drop.weapon===4){line([0,-1.1],[0,1.1],color,.13);arrow(0,1.1);for(const z of[-.45,.45])line([-.3,z],[.3,z]);}
-    else if(drop.weapon===5)for(let i=-1;i<=1;i++){line([i*.8,-.85],[i*.35,.85]);arrow(i*.35,.85);}
-    else if(drop.weapon===6){circle(.4);circle(.85);for(let i=0;i<8;i++){const a=i*TAU/8;line([Math.sin(a),Math.cos(a)],[Math.sin(a)*1.2,Math.cos(a)*1.2]);}}
-    else if(drop.weapon===7)for(const x of[-.65,.65]){line([x-.38,-.6],[x,.7]);line([x,.7],[x+.38,-.6]);line([x+.38,-.6],[x,-.3]);line([x,-.3],[x-.38,-.6]);}
-    if(selected){let prev;for(let i=0;i<=32;i++){const a=i*TAU/32,q=[Math.sin(a)*1.65,Math.cos(a)*1.65];if(prev)line(prev,q,'#d5fff5',.045);prev=q;}}
+    const line=(a,b,c,width)=>{const lift=c==='#101e33'?f.normal.scale(-.14):Vector3.Zero();this.lines.line(point(...a).add(lift),point(...b).add(lift),width,c);};
+    // White equipment seals and dark backing distinguish pickups from the solid
+    // colored enemy polyhedra. Everything remains printed on one tangent plane.
+    for(let i=0;i<40;i++){
+      const a=i*TAU/40,b=(i+1)*TAU/40,r=1.94;
+      const from=[Math.sin(a)*r,Math.cos(a)*r],to=[Math.sin(b)*r,Math.cos(b)*r];
+      line(from,to,'#101e33',.3);
+      if(i%10<8)line(from,to,selected?'#ffffff':'#dcefff',.07);
+    }
+    for(const stroke of pickupArt(drop.weapon,color)){
+      line(stroke.a,stroke.b,'#101e33',stroke.width+.16);
+      line(stroke.a,stroke.b,stroke.color,stroke.width);
+    }
+    // The small "take" chevron is shared by equipment, never by threats.
+    line([-.3,-1.6],[0,-1.8],'#ffffff',.095);line([0,-1.8],[.3,-1.6],'#ffffff',.095);
+    if(selected)for(let i=0;i<32;i++){const a=i*TAU/32,b=(i+1)*TAU/32;line([Math.sin(a)*2.2,Math.cos(a)*2.2],[Math.sin(b)*2.2,Math.cos(b)*2.2],color,.055);}
+  }
+  gatePortal(gate,t,player) {
+    const f=this.frame(gate.x,gate.z,.15),near=Math.max(0,1-Math.hypot(gate.x-player.x,gate.z-player.z)/9),warp=gate.warpTime||0;
+    const phase=t*(this.sim.reduced?.32:.7)+(gate.id%2)*Math.PI,center=f.point.add(f.normal.scale(2));
+    const point=(a,r,depth=0)=>center.add(f.right.scale(Math.sin(a)*r)).add(f.normal.scale(Math.cos(a)*r*1.18)).add(f.forward.scale(depth));
+    this.ring(gate.x,gate.z,2.15,.13,gate.color,.07,32);
+    for(const side of[-1,1])for(let i=0;i<36;i++){
+      if(i%6===5)continue;
+      const a=i*TAU/36+phase*side,r=1.55+(side+1)*.17;
+      this.string(point(a,r,side*.15),point(a+TAU/36*.85,r,side*.15),.09+near*.04,gate.color);
+    }
+    for(let i=0;i<5;i++){
+      const a=phase+i*TAU/5,r=1.4-near*.28;
+      this.string(point(a,r),point(a+.3,r*.72),.075,gate.color);
+      this.string(point(a+.3,r*.72),point(a+.49,r*.92),.045,'#dbf8ff');
+    }
+    // Slow helical packets enter the aperture; a warp blows the iris outward.
+    for(let i=0;i<(this.sim.reduced?3:6);i++){
+      const u=(t*.32+i/6)%1,a=phase+i*TAU/6,r=(1-u)*1.2;
+      this.string(point(a,r,(u-.5)*1.1),point(a+.18,r+.16,(u-.5)*1.1),.05+near*.03,gate.color);
+    }
+    if(warp>0)for(let k=0;k<3;k++){
+      const u=Math.max(0,Math.min(1,(1.1-warp-k*.12)/.7));if(u<=0||u>=1)continue;
+      let previous;for(let i=0;i<=32;i++){const q=point(i*TAU/32,1.6+u*2.5,(u-.5)*2);if(previous)this.string(previous,q,.15*(1-u),k?'#dffaff':gate.color);previous=q;}
+    }
   }
   worldPoint(nx,ny){const center=this.screenPoint(0,.85,0),dx=nx*this.width-center.x,dy=center.y-ny*this.height;return{screenAngle:Math.hypot(dx,dy)<8?undefined:Math.atan2(dx,dy)};}
   navigationPoint(nx,ny){const ray=this.scene.createPickingRay(nx*this.engine.getRenderWidth(),ny*this.engine.getRenderHeight(),Matrix.Identity(),this.camera,false);return this.surface.raycast(ray.origin,ray.direction);}
@@ -273,8 +302,7 @@ export class GameRenderer {
     this.lines.begin();for(const batch of this.solids.values())batch.begin();
     for(const gate of sim.gates){
       if(!gate.placed){let found=false;for(const dx of[0,2,-2,4,-4,6,-6]){for(const z of[0,2,-2,4,-4,7,-7,10,-10]){const point=this.map(gate.x+dx,z).point;if(s.ridgeHeight(point)<.35){gate.x+=dx;gate.z=z;found=true;break;}}if(found)break;}gate.placed=true;}
-      const f=this.frame(gate.x,gate.z,.15);this.ring(gate.x,gate.z,1.8,.13,gate.color,.07,32);
-      let previous;for(let i=0;i<=32;i++){const a=i*TAU/32,point=f.point.add(f.right.scale(Math.sin(a)*1.3)).add(f.normal.scale(1.7+Math.cos(a)*1.7));if(previous)this.string(previous,point,.1,gate.color);previous=point;}
+      this.gatePortal(gate,t,p);
     }
     if(p.hp>0){
       const frame=this.frame(0,0,.85,p.angle);this.solid('ship',frame,1.4,p.invuln>0&&Math.sin(t*18)>0?'#e6ffff':'#54fff1');
@@ -292,7 +320,23 @@ export class GameRenderer {
         for(let i=0;i<sections;i++){const f=this.frame(e.x,e.z,3+i*5.4+fall);this.solid('cube',f,new Vector3(3.3,5.1,3.3),e.hit>0?'#efffff':e.color);}
         this.ring(e.x,e.z,3,.14,e.color,e.warmup>0?.12:.05,40);continue;
       }
-      const warm=e.warmup>0?Math.max(.04,1-e.warmup/Math.max(.01,e.spawnWarmup)):1,kind=({diamond:'diamond',cube:'cube',spinner:'cross',mote:'dart',dart:'dart',prism:'prism',guard:'cube',splitter:'cube',anchor:'cube',boss:'cube'})[e.type];
+      if(e.type==='fracture'){
+        const stage=e.fractureStage,width=FRACTURE_STAGES[stage].width,warm=e.warmup>0?Math.max(.08,1-e.warmup/Math.max(.01,e.spawnWarmup)):1;
+        const f=this.frame(e.x,e.z,.18+width*.48*warm,e.angle),color=e.hit>0?'#fff2f0':e.color,damage=1-e.hp/e.maxHp;
+        if(Vector3.Dot(f.normal,this.camera.position.subtract(f.point))<=.1)continue;
+        if(stage>=2){
+          const offset=width*(.245+damage*.018)*warm,cell=width*.465*warm;
+          for(const x of[-1,1])for(const y of[-1,1])for(const z of[-1,1]){
+            const part={...f,point:f.point.add(f.right.scale(x*offset)).add(f.normal.scale(y*offset)).add(f.forward.scale(z*offset))};
+            this.solid('cube',part,cell,color);
+          }
+          // Glowing fault seams run across the top, previewing the next split.
+          for(const side of[-1,1])this.string(f.point.add(f.normal.scale(width*.49*warm)).add(f.right.scale(side*width*.45*warm)),f.point.add(f.normal.scale(width*.49*warm)),.06+damage*.08,color);
+        }else this.solid('cube',f,width*warm,color);
+        if(e.warmup>0)this.ring(e.x,e.z,e.radius+.4,.15,color,.08,24);
+        continue;
+      }
+      const warm=e.warmup>0?Math.max(.04,1-e.warmup/Math.max(.01,e.spawnWarmup)):1,kind=({diamond:'diamond',cube:'cube',spinner:'cross',mote:'dart',dart:'dart',prism:'prism',weaver:'hex',guard:'cube',splitter:'cube',anchor:'cube',boss:'cube'})[e.type];
       const size=(e.type==='boss'?5:e.type==='splitter'?3:e.type==='guard'?2:e.type==='anchor'?2.1:1.25)*e.size*warm,frame=this.frame(e.x,e.z,.55+size*.23,e.angle),color=e.hit>0?'#efffff':e.type==='boss'?(e.shielded?'#ff53c9':'#67ffff'):e.color;
       if(Vector3.Dot(frame.normal,this.camera.position.subtract(frame.point))<=.1)continue;
       const spin=e.type==='dart'||e.type==='mote'||e.type==='prism'?0:e.age*(e.type==='spinner'?2.1:.45)+e.phase;
@@ -301,6 +345,7 @@ export class GameRenderer {
         const length=e.state==='charge'?2.8:.9;
         this.string(frame.point,frame.point.add(frame.forward.scale(length)),e.state==='charge'?.18:.07,'#ffd29c');
       }
+      if(e.type==='weaver'){this.ring(e.x,e.z,1.25,.18,e.color,e.windup>0?.12:.04,16);for(const side of[-1,1])this.string(frame.point.add(frame.right.scale(side*.8)),frame.point.add(frame.right.scale(side*1.2)).add(frame.forward.scale(.6)),.08,e.color);}
       if(e.type==='anchor'){this.ring(e.x,e.z,2.1,.15,'#ffe56b',.075,32);this.ring(e.x,e.z,2.6,.15,'#ffe56b',.025,32);this.solid('diamond',frame,size*.45,'#fff2bc',-spin);}
       if(e.type==='boss'){
         for(const port of bossPorts(e)){
@@ -321,6 +366,11 @@ export class GameRenderer {
     for(let i=0;i<reactors.length;i++)for(let j=i+1;j<reactors.length;j++){
       const a=reactors[i],b=reactors[j];if(Math.hypot(a.x-b.x,a.z-b.z)>6.5)continue;
       let previous;for(let k=0;k<=4;k++){const f=k/4,point=v(this.map(a.x+(b.x-a.x)*f,a.z+(b.z-a.z)*f,.32+Math.sin(f*Math.PI)*.35).point);if(previous)this.lines.line(previous,point,.035,'#ffe56b');previous=point;}
+    }
+    for(const rift of sim.rifts){
+      if(rift.cancelled)continue;const active=rift.age>=rift.warning,e=riftEnds(rift);let previous;
+      for(let i=0;i<=24;i++){const u=i/24,point=v(this.map(e.ax+(e.bx-e.ax)*u,e.az+(e.bz-e.az)*u,active?.5:.16).point);if(previous&&(active||i%3!==0))this.string(previous,point,active?.4:.07,rift.color,active);previous=point;}
+      for(const[x,z]of[[e.ax,e.az],[e.bx,e.bz]])this.ring(x,z,active?.65:.35,.25,rift.color,.06,12);
     }
     for(const drop of sim.weaponDrops)this.weaponPickup(drop,t);
     if(sim.exitZone){const z=sim.exitZone;for(let i=0;i<3;i++)this.ring(z.x,z.z,z.radius+i*.36,.2+i*.2,'#91ff79',.1-i*.025,48);const f=this.frame(z.x,z.z,1.6);this.solid('diamond',f,1.1,'#c1ff99',t);this.lines.line(f.point,f.point.add(f.normal.scale(7)),.065,'#91ff79');}

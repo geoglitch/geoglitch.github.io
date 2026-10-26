@@ -12,6 +12,6 @@ test('every weapon is a compact static floor mark without floating geometry',()=
       lines:{line:(a,b)=>points.push(a,b)},solid:()=>{throw new Error('pickup displays must not contain floating solids');}};
     GameRenderer.prototype.weaponPickup.call(renderer,{weapon,id:7,x:14,z:14},time);
     assert.ok(points.length>20);
-    for(const point of points){assert.ok(Number.isFinite(point.x+point.y+point.z));assert.ok(Vector3.Distance(point,origin)<1.8,`weapon ${weapon} escaped its floor mark`);assert.ok(Math.abs(Vector3.Dot(point.subtract(origin),normal))<.0001);}
+    for(const point of points){assert.ok(Number.isFinite(point.x+point.y+point.z));assert.ok(Vector3.Distance(point,origin)<2.25,`weapon ${weapon} escaped its floor seal`);const height=Vector3.Dot(point.subtract(origin),normal);assert.ok(Math.abs(height)<.0001||Math.abs(height+.14)<.0001,'only the ink backing can sit below the printed illustration');}
   }
 });

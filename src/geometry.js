@@ -8,6 +8,9 @@ export const SOLIDS={
 const crossOutline=[[-.22,-.85],[.22,-.85],[.22,-.22],[.85,-.22],[.85,.22],[.22,.22],[.22,.85],[-.22,.85],[-.22,.22],[-.85,.22],[-.85,-.22],[-.22,-.22]];
 SOLIDS.cross={vertices:[...crossOutline.map(([x,z])=>[x,.18,z]),...crossOutline.map(([x,z])=>[x,-.18,z]),[0,.18,0],[0,-.18,0]],faces:[],outlineEdges:[]};
 for(let i=0;i<12;i++){const n=(i+1)%12;SOLIDS.cross.faces.push([24,i,n],[25,n+12,i+12],[i,i+12,n+12,n]);SOLIDS.cross.outlineEdges.push([i,n],[i+12,n+12],[i,i+12]);}
+SOLIDS.hex={vertices:[],faces:[[0,1,2,3,4,5],[11,10,9,8,7,6]]};
+for(const y of[-.25,.25])for(let i=0;i<6;i++){const a=i*Math.PI/3;SOLIDS.hex.vertices.push([Math.sin(a)*.7,y,Math.cos(a)*.7]);}
+for(let i=0;i<6;i++){const j=(i+1)%6;SOLIDS.hex.faces.push([i,j,j+6,i+6]);}
 for(const solid of Object.values(SOLIDS)){
   const edges=new Map();for(const face of solid.faces)for(let i=0;i<face.length;i++){const a=face[i],b=face[(i+1)%face.length];edges.set([a,b].sort((x,y)=>x-y).join(','),[a,b]);}
   solid.edges=solid.outlineEdges||[...edges.values()];

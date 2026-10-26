@@ -13,3 +13,5 @@ Unused earlier bitmap experiments remain in `art/`; their historical generation 
 The checked-in browser engine is `vendor/babylon-core.js`. Runtime assets use relative `public/` URLs and work directly on static hosting without Vite or compilation.
 
 Current portrait combat verification: `art/geometry-glitch-playable.png` (25 October 2026). Weapon pads use flat dark terrain patches behind native neon glyphs; the opening world uses broad rounded faces. This screenshot is not a runtime asset.
+
+New native geometric assets: hexagonal emitters in `src/geometry.js`, rift warning/fire lines in `src/renderer.js`, and pure encounter collision helpers in `src/rifts.js`. `src/layout.js` controls safe touch placement. Verification captures: `art/geometry-glitch-chaos.png` and `art/geometry-glitch-ipad.png`; neither is loaded by the game.
